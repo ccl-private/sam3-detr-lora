@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 from sam3.model.sam3_image_processor import Sam3Processor
 from sam3.visualization_utils import COLORS
 from sam3_detr_exp.modular_pipeline import WEIGHTS_DIR, build_detector_model
+from sam3_detr_exp.utils import load_lora_state
 
 EXP_ROOT = ROOT / "sam3_detr_exp"
 DEFAULT_IMAGE = ROOT / "assets" / "images" / "test_image.jpg"
@@ -131,6 +132,12 @@ def main() -> None:
     )
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument(
+        "--lora",
+        type=Path,
+        default=None,
+        help="Optional LoRA checkpoint produced by train_detr_lora.py",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=OUTPUT_DIR / "detr_prompt_inference.png",
@@ -156,6 +163,17 @@ def main() -> None:
 
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
         model = build_detector_model(bpe_path=str(DEFAULT_BPE)).to(device).eval()
+        if args.lora is not None:
+            if not args.lora.exists():
+                raise FileNotFoundError(f"LoRA checkpoint not found: {args.lora}")
+            meta, missing, unexpected = load_lora_state(model, args.lora)
+            model.to(device).eval()
+            print(f"loaded lora: {args.lora}")
+            print("lora meta:", meta)
+            if missing:
+                print("missing keys:", missing)
+            if unexpected:
+                print("unexpected keys:", unexpected)
         processor = Sam3Processor(
             model,
             device=device,

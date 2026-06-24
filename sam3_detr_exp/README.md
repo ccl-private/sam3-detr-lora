@@ -7,8 +7,18 @@
 - 对比原始模型和模块化模型的推理结果
 - 单独跑 detector 提示推理
 
+DETR LoRA 训练部分现在也已经整理成清楚的分层结构：
+
+- `train_detr_lora.py`
+  - Lightning 2.6.5 启动入口
+- `model/`
+  - 训练相关模型封装
+- `utils/`
+  - dataset / LoRA / loss / save-load 工具
+
 如果你只想知道“这里每个文件是干什么的、怎么用”，先看这份 README。
 如果你要看模块输入输出、shape、数据流图，再看 [docs/modular-weights.md](/slow_disk/ccl/codes/sam3/sam3_detr_exp/docs/modular-weights.md)。
+如果你后面要做 DETR 的 LoRA 微调，再看 [docs/detr-lora-finetune.md](/slow_disk/ccl/codes/sam3/sam3_detr_exp/docs/detr-lora-finetune.md)。
 
 ## Directory Overview
 
@@ -143,6 +153,16 @@ python sam3_detr_exp/run_detr_prompt_inference.py \
   --output sam3_detr_exp/outputs/detr_text_prompt.png
 ```
 
+加载 LoRA 后推理：
+
+```bash
+python sam3_detr_exp/run_detr_prompt_inference.py \
+  --image assets/images/test_image.jpg \
+  --text "linear crack" \
+  --lora sam3_detr_exp/weights_lora/detr_transformer_lora.pt \
+  --output sam3_detr_exp/outputs/detr_text_prompt_lora.png
+```
+
 框提示：
 
 ```bash
@@ -156,6 +176,94 @@ python sam3_detr_exp/run_detr_prompt_inference.py \
 
 - `--box` 格式是像素坐标 `x0,y0,x1,y1`
 - 脚本内部会自动转成模型需要的归一化 `cxcywh`
+- `--lora` 可选，用来加载 `train_detr_lora.py` 训练出来的增量权重
+
+### [train_detr_lora.py](/slow_disk/ccl/codes/sam3/sam3_detr_exp/train_detr_lora.py)
+
+用途：
+
+- Lightning 2.6.5 训练入口
+- 在当前 modular detector 上做 detector-only LoRA 微调
+- 直接读取 `/slow_disk/ccl/data/crack_segment` 的 YOLO segmentation 数据集
+
+什么时候用：
+
+- 你想先验证 LoRA 是否能挂到当前 transformer 上
+- 你想先跑 detector-only 微调，不接 tracker
+- 你想直接在裂缝分割数据集上训练
+
+怎么用：
+
+最小 dry-run：
+
+```bash
+python sam3_detr_exp/train_detr_lora.py \
+  --dataset-root /slow_disk/ccl/data/crack_segment \
+  --train-split train \
+  --val-split val \
+  --max-train-samples 1 \
+  --max-val-samples 1 \
+  --dry-run
+```
+
+正式训练：
+
+```bash
+python sam3_detr_exp/train_detr_lora.py \
+  --dataset-root /slow_disk/ccl/data/crack_segment \
+  --train-split train \
+  --val-split val \
+  --batch-size 20 \
+  --epochs 20
+```
+
+说明：
+
+- 当前只走文本提示训练
+- 当前框架版本：
+  - `lightning==2.6.5`
+- 示例里使用 `--batch-size 20`
+- 默认 prompt 使用类别名：
+  - `linear crack`
+  - `alligator crack`
+  - `pothole`
+- 如果你想统一都用一个词，可以加：
+  - `--prompt-mode generic --generic-prompt crack`
+- 输出默认保存到 `sam3_detr_exp/weights_lora/detr_transformer_lora.pt`
+
+训练后验证：
+
+```bash
+python sam3_detr_exp/run_detr_prompt_inference.py \
+  --image assets/images/test_image.jpg \
+  --text "linear crack" \
+  --lora sam3_detr_exp/weights_lora/detr_transformer_lora.pt \
+  --output sam3_detr_exp/outputs/detr_text_prompt_lora.png
+```
+
+### [model/](/slow_disk/ccl/codes/sam3/sam3_detr_exp/model)
+
+用途：
+
+- 放训练相关模型封装
+- 当前主要是：
+  - `detr_lora_module.py`
+  - `DetrLoraLightningModule`
+
+### [utils/](/slow_disk/ccl/codes/sam3/sam3_detr_exp/utils)
+
+用途：
+
+- 放 DETR LoRA 训练公共工具
+- 当前包括：
+  - `detr_lora_data.py`
+    - YOLO segmentation dataset
+    - LightningDataModule
+  - `detr_lora_utils.py`
+    - LoRA 挂载 / save-load
+    - detector 组装
+    - prompt / target 构造
+    - matcher + loss
 
 ### [weights_modular/](/slow_disk/ccl/codes/sam3/sam3_detr_exp/weights_modular)
 
@@ -197,6 +305,24 @@ python sam3_detr_exp/run_detr_prompt_inference.py \
 - 想理解模块边界时
 - 想做模块级微调 / 蒸馏 / ONNX 时
 - 想确认每个模块实际吃什么、吐什么时
+
+### [docs/detr-lora-finetune.md](/slow_disk/ccl/codes/sam3/sam3_detr_exp/docs/detr-lora-finetune.md)
+
+用途：
+
+- 说明怎么在当前非 JIT 模块化方案上做 DETR LoRA 微调
+- 包含：
+  - 推荐训练边界
+  - 推荐冻结/训练模块
+  - LoRA 挂载位置
+  - loss 和数据组织建议
+  - 保存 / 加载 / 部署建议
+
+什么时候看：
+
+- 你准备开始做 detector 微调时
+- 你想先做 LoRA，再做蒸馏时
+- 你想保持模块化、后续还能独立替换 detector 时
 
 ### [outputs/](/slow_disk/ccl/codes/sam3/sam3_detr_exp/outputs)
 
