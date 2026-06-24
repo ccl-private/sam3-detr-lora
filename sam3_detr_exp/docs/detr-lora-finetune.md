@@ -1,5 +1,16 @@
 # SAM3 DETR LoRA Fine-Tuning Plan
 
+## Environment Baseline
+
+本实验目录当前以仓库根目录的 [requirements.txt](/slow_disk/ccl/codes/sam3/requirements.txt) 作为实际依赖基线。
+
+说明：
+
+- 这份 `requirements.txt` 直接来自当前 `.venv` 的 `pip freeze`
+- 不再以原始上游 SAM3 的 `pyproject.toml` 依赖为准
+- 当前验证环境是 `Python 3.13.11`
+- 当前训练框架版本是 `lightning 2.6.5`
+
 这份文档只讨论 `sam3_detr_exp` 这条非 JIT 模块化链路下，怎么对 DETR 部分做 LoRA 微调。
 
 目标很明确：

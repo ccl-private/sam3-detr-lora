@@ -9,6 +9,36 @@
 
 如果你是第一次看这个项目，先从这里开始就够了。
 
+## Environment
+
+当前项目依赖以本地虚拟环境 `/slow_disk/ccl/codes/sam3/.venv` 为准，不再以原始 SAM3 上游仓库的 `pyproject.toml` 为准。
+
+当前验证环境：
+
+- Python `3.13.11`
+- PyTorch `2.10.0+cu128`
+- TorchVision `0.25.0+cu128`
+- Lightning `2.6.5`
+
+对应依赖已经固化到根目录 [requirements.txt](/slow_disk/ccl/codes/sam3/requirements.txt)。
+
+安装方式：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+pip install -e .
+```
+
+说明：
+
+- `requirements.txt` 直接来自当前可运行环境的 `pip freeze`
+- 这是锁版本环境，不是最小依赖集合
+- 里面包含 CUDA 12.8 对应的 torch、torchvision 和 NVIDIA 运行库
+- 如果你切换 Python 大版本、CUDA 版本或驱动，建议重新导出一份
+
 ## Project Layout
 
 ### [`sam3_detr_exp/run_video_det_modular.py`](/slow_disk/ccl/codes/sam3/sam3_detr_exp/run_video_det_modular.py)
