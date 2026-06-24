@@ -91,6 +91,19 @@ python sam3_detr_exp/run_video_det_modular.py \
 
 只跑 detector 提示推理，支持文本提示和框提示，也支持加载 LoRA。
 
+数据格式要求：
+
+- `--image` 必须是单张 RGB 图像
+- 支持扩展名：
+  - `.jpg`
+  - `.jpeg`
+  - `.png`
+  - `.bmp`
+- 文本提示用 `--text`
+- 框提示用 `--box x0,y0,x1,y1`
+- `--box` 是原图像素坐标，不是归一化坐标
+- `--text` 和 `--box` 二选一，不能同时传
+
 文本提示：
 
 ```bash
@@ -114,6 +127,12 @@ python sam3_detr_exp/run_detr_prompt_inference.py \
 
 对比原始 `sam3.pt` 和模块化 detector 在同一张图上的结果。
 
+数据格式要求：
+
+- `--image` 是单张 RGB 图像
+- 默认示例是 `assets/images/test_image.jpg`
+- `--prompt` 是文本提示词，例如 `shoe`
+
 ```bash
 python sam3_detr_exp/compare_image_original_vs_modular.py \
   --image assets/images/test_image.jpg \
@@ -123,6 +142,13 @@ python sam3_detr_exp/compare_image_original_vs_modular.py \
 ### [`sam3_detr_exp/compare_video_original_vs_modular.py`](/slow_disk/ccl/codes/sam3/sam3_detr_exp/compare_video_original_vs_modular.py)
 
 对比原始 `sam3.pt` 和模块化 video pipeline 在同一段视频上的结果。
+
+数据格式要求：
+
+- `--video` 当前走的是单个视频文件路径
+- 默认示例是 `assets/videos/bedroom.mp4`
+- 推荐直接用 `.mp4`
+- `--prompt` 是文本提示词，例如 `person`
 
 ```bash
 python sam3_detr_exp/compare_video_original_vs_modular.py \
@@ -164,6 +190,56 @@ python sam3_detr_exp/train_detr_lora.py \
 - 监督输出是 `pred_logits`、`pred_boxes`、`pred_masks`
 - 文本提示默认来自 `data.yaml` 的类别名
 - LoRA 权重默认保存到 `sam3_detr_exp/weights_lora/detr_transformer_lora.pt`
+
+训练数据格式要求：
+
+- `--dataset-root` 目录下必须有 `data.yaml`
+- `data.yaml` 里必须有 `names:`，并按 `class_id: class_name` 形式定义类别名
+- 每个 split 目前默认直接放在：
+  - `train/`
+  - `val/`
+- 图片和标签当前是“同目录同名”：
+  - `train/xxx.jpg`
+  - `train/xxx.txt`
+  - `val/yyy.png`
+  - `val/yyy.txt`
+- 标签格式是 YOLO segmentation：
+  - 每一行一个实例
+  - 第 1 列是 `class_id`
+  - 后面是多边形点序列：`x1 y1 x2 y2 ...`
+  - 坐标必须是相对原图的归一化坐标，范围 `[0, 1]`
+  - 一行至少要有 3 个点，也就是至少 `7` 列
+- 当前 dataloader 会把同一张图中“同一类别”的多个 polygon 聚合成一个训练样本
+
+目录示例：
+
+```text
+dataset_root/
+  data.yaml
+  train/
+    0001.jpg
+    0001.txt
+    0002.jpg
+    0002.txt
+  val/
+    0101.jpg
+    0101.txt
+```
+
+`data.yaml` 示例：
+
+```yaml
+names:
+  0: linear crack
+  1: alligator crack
+  2: pothole
+```
+
+标签 `0001.txt` 单行示例：
+
+```text
+0 0.125 0.210 0.180 0.215 0.240 0.260 0.230 0.320
+```
 
 ## LoRA Effect
 
@@ -209,7 +285,7 @@ LoRA 训练代码已经从单文件脚本提炼成分层结构：
 
 - 模块拆分总览、10 个模块分别是什么、每个模块的输入输出 shape、完整 detector/tracker 数据流图：
   [`sam3_detr_exp/docs/modular-weights.md`](/slow_disk/ccl/codes/sam3/sam3_detr_exp/docs/modular-weights.md)
-- DETR LoRA 微调范围、冻结策略、训练入口、保存加载方式：
+- DETR LoRA 微调范围、冻结策略、训练入口、保存加载方式、训练数据格式要求：
   [`sam3_detr_exp/docs/detr-lora-finetune.md`](/slow_disk/ccl/codes/sam3/sam3_detr_exp/docs/detr-lora-finetune.md)
 
 ## Recommended Order

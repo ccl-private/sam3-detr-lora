@@ -75,6 +75,36 @@ python sam3_detr_exp/run_video_det_modular.py \
 9. `tracker_maskmem_backbone`
 10. `tracker_transformer`
 
+### 输入数据格式要求
+
+这条模块化推理主线当前涉及两类输入：
+
+1. 图片 detector 推理
+2. 视频 tracker 推理
+
+图片相关脚本：
+
+- `run_detr_prompt_inference.py`
+- `compare_image_original_vs_modular.py`
+
+要求：
+
+- 输入是单张 RGB 图像
+- 支持 `.jpg`、`.jpeg`、`.png`、`.bmp`
+- 文本提示直接传字符串
+- 如果是框提示，格式必须是 `x0,y0,x1,y1`
+- 这里的 box 是原图像素坐标，不是归一化坐标
+
+视频相关脚本：
+
+- `compare_video_original_vs_modular.py`
+
+要求：
+
+- 当前直接读取单个视频文件
+- 默认示例是 `.mp4`
+- 提示方式当前是文本提示
+
 ### 2. 跑图片对比
 
 ```bash

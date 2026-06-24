@@ -22,6 +22,112 @@
 
 当前最适合做 LoRA 的对象，不是整个 `sam3.pt`，而是模块化后的 detector 子模块。
 
+## Data Format Requirements
+
+当前训练代码只支持文本提示的 detector-only 数据组织，使用的是 YOLO segmentation 标注。
+
+### 目录结构
+
+`--dataset-root` 下需要至少有这些内容：
+
+```text
+dataset_root/
+  data.yaml
+  train/
+    0001.jpg
+    0001.txt
+    0002.jpg
+    0002.txt
+  val/
+    0101.jpg
+    0101.txt
+```
+
+说明：
+
+- `train/` 和 `val/` 是默认 split 名，可以通过 `--train-split` 和 `--val-split` 改
+- 当前实现假设“图片和标签在同一目录，同名不同后缀”
+- 不读取 `images/train`、`labels/train` 这种分层目录
+
+### 图片格式
+
+当前 dataset loader 支持：
+
+- `.jpg`
+- `.jpeg`
+- `.png`
+- `.bmp`
+
+读取后会统一：
+
+- 转成 RGB
+- resize 到 `--resolution`
+- normalize 到当前 detector 预处理格式
+
+### `data.yaml` 格式
+
+当前至少要求能解析出 `names:`：
+
+```yaml
+names:
+  0: linear crack
+  1: alligator crack
+  2: pothole
+```
+
+要求：
+
+- key 是类别 id
+- value 是类别名
+- 训练时如果 `--prompt-mode class_name`，文本提示就直接来自这里
+- 下划线会自动替换成空格，例如 `linear_crack -> linear crack`
+
+### 标签格式
+
+每个 `.txt` 文件使用 YOLO segmentation 每行一个实例：
+
+```text
+class_id x1 y1 x2 y2 x3 y3 ...
+```
+
+要求：
+
+- 第 1 列是 `class_id`
+- 后面是 polygon 顶点序列
+- 坐标是相对原图的归一化坐标，范围 `[0, 1]`
+- 一行至少要能形成 3 个点，所以最少 `7` 列
+- 点数可以大于 3
+
+单行示例：
+
+```text
+0 0.125 0.210 0.180 0.215 0.240 0.260 0.230 0.320
+```
+
+### 当前训练样本是怎么构造的
+
+当前不是“每个 polygon 一条样本”，而是：
+
+- 先按图片读取
+- 再按 `class_id` 分组
+- 同一张图中同一类别的多个 polygon 会合成一个训练样本
+
+也就是说，一个 sample 大致对应：
+
+- 一张图
+- 一个文本提示
+- 这个提示对应的一组 `gt_boxes`
+- 这组实例对应的一组 `gt_masks`
+
+### 当前 prompt 来源
+
+训练时文本提示有两种模式：
+
+- `--prompt-mode class_name`
+  - 从 `data.yaml` 的类别名读取
+- `--prompt-mode generic --generic-prompt crack`
+  - 所有样本统一使用一个固定文本提示
+
 ## 1. 推荐微调范围
 
 推荐按下面这个优先级来做。
