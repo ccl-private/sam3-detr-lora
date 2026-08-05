@@ -192,8 +192,8 @@ def _render_results(
     masks: np.ndarray,
     boxes: np.ndarray,
     scores: np.ndarray,
-    prompt_box: Box,
-    negative_boxes: Sequence[Box],
+    prompt_box: Optional[Box] = None,
+    negative_boxes: Sequence[Box] = (),
 ) -> Image.Image:
     base = _as_rgb(image).astype(np.float32)
     colors = np.asarray(
@@ -249,7 +249,8 @@ def _render_results(
         draw.text((label_left + 3, label_top + 1), label, fill=(0, 0, 0))
 
     # Keep positive and negative exemplars visible.
-    draw.rectangle(prompt_box, outline=(0, 255, 80), width=line_width)
+    if prompt_box is not None:
+        draw.rectangle(prompt_box, outline=(0, 255, 80), width=line_width)
     for negative_box in negative_boxes:
         draw.rectangle(tuple(negative_box), outline=(255, 50, 50), width=line_width)
     return output
