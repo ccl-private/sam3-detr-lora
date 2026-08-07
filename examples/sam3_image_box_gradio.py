@@ -50,6 +50,65 @@ _CHECKPOINT_PATH: Optional[str] = (
 )
 _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+CROSSHAIR_CSS = """
+.box-prompt-image img {
+    cursor: crosshair !important;
+}
+.sam3-crosshair-line {
+    position: fixed;
+    display: none;
+    pointer-events: none;
+    z-index: 9999;
+    background: rgba(0, 255, 255, 0.95);
+    box-shadow: 0 0 1px #000, 0 0 3px #000;
+}
+.sam3-crosshair-horizontal { height: 1px; }
+.sam3-crosshair-vertical { width: 1px; }
+"""
+
+CROSSHAIR_JS = r"""
+() => {
+    const attached = new WeakSet();
+    const horizontal = document.createElement("div");
+    const vertical = document.createElement("div");
+    horizontal.className = "sam3-crosshair-line sam3-crosshair-horizontal";
+    vertical.className = "sam3-crosshair-line sam3-crosshair-vertical";
+    document.body.append(horizontal, vertical);
+
+    const hide = () => {
+        horizontal.style.display = "none";
+        vertical.style.display = "none";
+    };
+    const attach = () => {
+        document.querySelectorAll(".box-prompt-image img").forEach((image) => {
+            if (attached.has(image)) return;
+            attached.add(image);
+            image.addEventListener("mousemove", (event) => {
+                const rect = image.getBoundingClientRect();
+                if (!rect.width || !rect.height) return hide();
+                const x = Math.min(Math.max(event.clientX, rect.left), rect.right);
+                const y = Math.min(Math.max(event.clientY, rect.top), rect.bottom);
+                horizontal.style.left = `${rect.left}px`;
+                horizontal.style.top = `${y}px`;
+                horizontal.style.width = `${rect.width}px`;
+                vertical.style.left = `${x}px`;
+                vertical.style.top = `${rect.top}px`;
+                vertical.style.height = `${rect.height}px`;
+                horizontal.style.display = "block";
+                vertical.style.display = "block";
+            });
+            image.addEventListener("mouseleave", hide);
+        });
+    };
+    attach();
+    new MutationObserver(attach).observe(document.body, {
+        childList: true,
+        subtree: true,
+    });
+    window.addEventListener("blur", hide);
+}
+"""
+
 
 def get_model():
     """Load the model once, on the first inference request."""
@@ -327,7 +386,9 @@ def run_inference(
 
 
 def build_demo() -> gr.Blocks:
-    with gr.Blocks(title="SAM 3 视觉样例检索") as demo:
+    with gr.Blocks(
+        title="SAM 3 视觉样例检索", css=CROSSHAIR_CSS, js=CROSSHAIR_JS
+    ) as demo:
         gr.Markdown(
             "# SAM 3：框选一个样例，分割所有相似目标\n"
             "绿色框是要寻找的正样例，红色框是需要排除的负样例。"
@@ -342,6 +403,7 @@ def build_demo() -> gr.Blocks:
                     label="上传并框选样例",
                     type="numpy",
                     interactive=True,
+                    elem_classes="box-prompt-image",
                 )
                 box_mode = gr.Radio(
                     choices=["正样例框", "抑制框"],

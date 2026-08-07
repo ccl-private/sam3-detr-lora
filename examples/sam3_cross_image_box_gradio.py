@@ -245,7 +245,11 @@ def run_cross_image(reference, target, prompts, threshold):
 
 
 def build_demo():
-    with gr.Blocks(title="SAM 3 跨图视觉提示检索") as demo:
+    with gr.Blocks(
+        title="SAM 3 跨图视觉提示检索",
+        css=shared.CROSSHAIR_CSS,
+        js=shared.CROSSHAIR_JS,
+    ) as demo:
         gr.Markdown(
             "# SAM 3：在提示图框选，在目标图查找\n"
             "左图绿色框提供正样例，红色框提供负样例；右图输出匹配实例。"
@@ -258,7 +262,10 @@ def build_demo():
         with gr.Row():
             with gr.Column():
                 reference_image = gr.Image(
-                    label="1. 上传提示图并画框", type="numpy", interactive=True
+                    label="1. 上传提示图并画框",
+                    type="numpy",
+                    interactive=True,
+                    elem_classes="box-prompt-image",
                 )
                 box_mode = gr.Radio(
                     ["正样例框", "抑制框"],
