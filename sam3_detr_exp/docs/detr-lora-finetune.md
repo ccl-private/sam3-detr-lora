@@ -36,9 +36,9 @@ train: train
 val: val
 
 names:
-  0: linear crack
-  1: alligator crack
-  2: pothole
+  0: class one prompt
+  1: class two prompt
+  2: class three prompt
 ```
 
 对应目录至少包含：
@@ -84,9 +84,9 @@ names:
 
 ```yaml
 names:
-  0: linear crack
-  1: alligator crack
-  2: pothole
+  0: class one prompt
+  1: class two prompt
+  2: class three prompt
 ```
 
 要求：
@@ -94,7 +94,7 @@ names:
 - key 是类别 id
 - value 是类别名
 - 训练时如果 `--prompt-mode class_name`，文本提示就直接来自这里
-- 下划线会自动替换成空格，例如 `linear_crack -> linear crack`
+- 下划线会自动替换成空格，例如 `class_one -> class one`
 
 ### 标签格式
 
@@ -139,7 +139,7 @@ class_id x1 y1 x2 y2 x3 y3 ...
 
 - `--prompt-mode class_name`
   - 从 `data.yaml` 的类别名读取
-- `--prompt-mode generic --generic-prompt crack`
+- `--prompt-mode generic --generic-prompt object`
   - 所有样本统一使用一个固定文本提示
 
 ## 1. 推荐微调范围
@@ -567,13 +567,16 @@ LoRA 和蒸馏是能叠加的。
 - 分类 / box / mask loss
 - LoRA 增量权重保存
 
-建议先这样验证：
+建议先这样验证完整的检测与分割训练链路：
 
 ```bash
-python sam3_detr_exp/train_detr_lora.py \
-  --data-yaml /slow_disk/ccl/data/crack_segment/data.yaml \
-  --max-train-samples 1 \
-  --max-val-samples 1 \
+./.venv/bin/python sam3_detr_exp/train_detr_lora.py \
+  --data-yaml /path/to/data.yaml \
+  --prompt-mode class_name \
+  --train-dot-score \
+  --train-seg-head \
+  --max-train-samples 20 \
+  --max-val-samples 10 \
   --dry-run
 ```
 
@@ -584,26 +587,18 @@ python sam3_detr_exp/train_detr_lora.py \
 - detector 输出和 matcher / loss 是对齐的
 - 当前 modular pipeline 可以承接微调
 
-后面再把单图模式替换成正式数据集就顺了。
+这里的两个训练开关含义是：
 
-## 17. 现在已经接上的实际数据集
+- `--train-dot-score`：训练文本提示与目标查询之间的分类/匹配打分层，改善检测分类
+- `--train-seg-head`：训练分割头，配合 mask loss 改善实例掩码
 
-当前训练脚本已经直接接到：
+不加这两个开关时，分类打分层和分割头保持冻结；mask loss 仍可通过 LoRA 路径反向传播，但对当前同时要求检测和分割的任务，建议显式开启。
 
-- `/slow_disk/ccl/data/crack_segment`
+## 17. 通用训练方式
 
-这套数据目前按下面方式使用：
+训练数据完全由 `--data-yaml` 指定，项目代码不绑定具体数据集、目录或类别。更换数据集时只需要更换 YAML。
 
-- 数据格式：
-  - YOLO segmentation
-- 数据入口：
-  - `train/`
-  - `val/`
-- 标注来源：
-  - 每张图同名 `.txt`
-- 每一行：
-  - `class_id x1 y1 x2 y2 ...`
-  - 坐标是归一化多边形点
+对于从视频抽帧得到的数据，Train/Val 必须按视频或序列分组，不能把同一视频的相邻帧随机拆到两边，否则验证指标会因画面高度相似而虚高。具体划分脚本和统计应随数据集维护，不放进模型项目。
 
 脚本当前处理逻辑是：
 
@@ -612,7 +607,57 @@ python sam3_detr_exp/train_detr_lora.py \
 3. 从 mask 对应的 polygon 外接框生成 gt box
 4. 用类别名作为文本提示，做 detector-only 训练
 
-也就是说，现在这份 LoRA 训练不是再用临时 box 监督演示，而是已经在真实分割数据上跑通了。
+### 4×A800 80GB 推荐参数
+
+`--batch-size` 是每个 GPU 的 batch size。使用 4 张卡且 `--batch-size 4` 时：
+
+```text
+global batch size = 4 GPUs × 4 samples/GPU = 16
+```
+
+建议从每卡 4 开始，而不是直接填满显存。分割样本的实例数和 mask 数量会变化，必须为高实例数 batch 和 CUDA 临时缓存保留余量。稳定运行数百 step 后，如果单卡峰值显存仍低于约 55GB，可以再尝试每卡 8。
+
+推荐起步参数：
+
+- `--devices 4`：使用 4 张 GPU
+- `--batch-size 4`：每卡 4，全局 batch 16
+- `--resolution 1008`：保持 SAM3 当前训练分辨率
+- `--precision bf16-mixed`：A800 原生支持 BF16
+- `--num-workers 8`：每个训练进程 8 个 worker，总计最多 32 个
+- `--lr 2e-4`：LoRA 起始学习率
+- `--weight-decay 1e-2`
+- `--lora-rank 8`
+- `--lora-alpha 16`
+- `--lora-dropout 0.05`
+- `--mask-weight 2.0`
+
+4×A800 正式训练命令：
+
+```bash
+./.venv/bin/python sam3_detr_exp/train_detr_lora.py \
+  --data-yaml /path/to/data.yaml \
+  --prompt-mode class_name \
+  --train-dot-score \
+  --train-seg-head \
+  --accelerator gpu \
+  --devices 4 \
+  --precision bf16-mixed \
+  --resolution 1008 \
+  --batch-size 4 \
+  --num-workers 8 \
+  --lr 2e-4 \
+  --weight-decay 1e-2 \
+  --mask-weight 2.0 \
+  --lora-rank 8 \
+  --lora-alpha 16 \
+  --lora-dropout 0.05 \
+  --epochs 50 \
+  --save sam3_detr_exp/weights_lora/detr_lora.pt
+```
+
+`50` 个 epoch 是建议的首轮上限，不应只根据训练 loss 决定是否继续。应观察独立验证集的分类、box 和 mask loss；如果验证指标已经停止改善，就提前结束。若出现 OOM，优先把每卡 batch 从 `4` 降到 `2`，不要先降低输入分辨率。
+
+每张图片会按其中出现的类别拆成文本提示样本，同一类别的多个实例一起参与 Hungarian matching、box loss 和 mask loss。因此当前训练同时覆盖检测框和实例分割，不是单纯的 box 监督。
 
 ## 18. 训练后怎么验证
 
@@ -621,18 +666,16 @@ python sam3_detr_exp/train_detr_lora.py \
 ```bash
 python sam3_detr_exp/run_detr_prompt_inference.py \
   --image assets/images/test_image.jpg \
-  --text "linear crack" \
-  --lora sam3_detr_exp/weights_lora/detr_transformer_lora.pt \
-  --output sam3_detr_exp/outputs/detr_text_prompt_lora.png
+  --text "class name from data yaml" \
+  --lora sam3_detr_exp/weights_lora/detr_lora.pt \
+  --output sam3_detr_exp/outputs/detr_lora.png
 ```
 
 说明：
 
 - `--lora` 指向 `train_detr_lora.py` 保存出来的增量权重
-- 文本提示建议先和训练时保持一致
-- 如果训练时用了：
-  - `--prompt-mode generic --generic-prompt crack`
-  - 那推理时也优先用 `--text crack`
+- 文本提示应优先使用 YAML `names` 中的训练类别名称
+- `--train-dot-score` 和 `--train-seg-head` 训练出的额外权重也会包含在 LoRA checkpoint 中并由推理入口恢复
 
 ## 19. 当前代码结构
 
@@ -646,7 +689,8 @@ python sam3_detr_exp/run_detr_prompt_inference.py \
    - 负责 training step / validation step / optimizer / LoRA checkpoint 保存
 
 3. `utils/detr_lora_data.py`
-   - crack YOLO segmentation dataset
+   - YAML 驱动的 YOLO segmentation dataset
+   - 从 YAML 的 `path/train/val/names` 解析数据和提示词
    - LightningDataModule
 
 4. `utils/detr_lora_utils.py`

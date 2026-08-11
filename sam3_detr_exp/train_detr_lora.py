@@ -119,6 +119,7 @@ def main() -> None:
     trainer = L.Trainer(
         accelerator=args.accelerator,
         devices=args.devices,
+        strategy="ddp_find_unused_parameters_true" if args.devices > 1 else "auto",
         max_epochs=1 if args.dry_run else args.epochs,
         precision=args.precision,
         log_every_n_steps=args.log_every,
@@ -129,8 +130,9 @@ def main() -> None:
         fast_dev_run=False,
     )
     trainer.fit(module, datamodule=datamodule)
-    module.save_lora_checkpoint(args.save)
-    print(f"saved: {args.save}")
+    if trainer.is_global_zero:
+        module.save_lora_checkpoint(args.save)
+        print(f"saved: {args.save}")
 
 
 if __name__ == "__main__":

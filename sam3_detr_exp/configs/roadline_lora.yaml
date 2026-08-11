@@ -1,6 +1,6 @@
-path: ../../../../data/roadline20251023
-train: train
-val: val
+path: /slow_disk/ccl/data/roadline20251023
+train: video_disjoint/train
+val: video_disjoint/val
 
 names:
   0: white solid lane line

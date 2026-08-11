@@ -19,6 +19,34 @@ from sam3_detr_exp.utils import (
 )
 
 
+def _move_tensors_to_device(value, device: torch.device):
+    """Recursively align detached backbone outputs with the current DDP rank."""
+    if isinstance(value, torch.Tensor):
+        return value.to(device=device, non_blocking=True)
+    if isinstance(value, dict):
+        return {key: _move_tensors_to_device(item, device) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_move_tensors_to_device(item, device) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_move_tensors_to_device(item, device) for item in value)
+    return value
+
+
+def _reset_stale_decoder_caches(detector, device: torch.device) -> None:
+    """Drop coordinate grids created on cuda:0 before Lightning assigns a DDP rank."""
+    decoder = detector.transformer.decoder
+    cache = decoder.compilable_cord_cache
+    if cache is not None and any(tensor.device != device for tensor in cache):
+        decoder.compilable_cord_cache = None
+        decoder.compilable_stored_size = None
+    if any(
+        tensor.device != device
+        for cached_pair in decoder.coord_cache.values()
+        for tensor in cached_pair
+    ):
+        decoder.coord_cache.clear()
+
+
 class DetrLoraLightningModule(L.LightningModule):
     def __init__(
         self,
@@ -79,10 +107,12 @@ class DetrLoraLightningModule(L.LightningModule):
             self.device, non_blocking=True
         )
         texts = [sample.text_prompt for sample in batch]
+        _reset_stale_decoder_caches(self.detector, self.device)
 
         with torch.no_grad():
             backbone_out = self.detector.backbone.forward_image(images)
             backbone_out.update(self.detector.backbone.forward_text(texts, device=self.device))
+            backbone_out = _move_tensors_to_device(backbone_out, self.device)
 
         find_input = make_find_stage(len(batch), self.device)
         geometric_prompt = build_prompt(self.detector, batch, self.device)
@@ -102,19 +132,28 @@ class DetrLoraLightningModule(L.LightningModule):
         )
 
         batch_size = len(batch)
-        self.log(f"{stage}/loss", loss, prog_bar=(stage == "train"), batch_size=batch_size)
+        sync_dist = stage == "val"
+        self.log(
+            f"{stage}/loss",
+            loss,
+            prog_bar=(stage == "train"),
+            batch_size=batch_size,
+            sync_dist=sync_dist,
+        )
         for key in ("loss_cls", "loss_box", "loss_giou", "loss_mask"):
             self.log(
                 f"{stage}/{key}",
                 metrics[key],
                 prog_bar=False,
                 batch_size=batch_size,
+                sync_dist=sync_dist,
             )
         self.log(
             f"{stage}/num_matches",
             float(metrics["num_matches"]),
             prog_bar=False,
             batch_size=batch_size,
+            sync_dist=sync_dist,
         )
         return loss
 
