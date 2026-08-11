@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT))
 
 from sam3_detr_exp.model import DetrLoraLightningModule
 from sam3_detr_exp.utils import CrackYoloSegDataModule
-from sam3_detr_exp.utils.detr_lora_data import DEFAULT_DATASET_ROOT
+from sam3_detr_exp.utils.detr_lora_data import DEFAULT_DATA_YAML
 
 EXP_ROOT = Path(__file__).resolve().parent
 LORA_DIR = EXP_ROOT / "weights_lora"
@@ -22,11 +22,9 @@ LORA_DIR = EXP_ROOT / "weights_lora"
 
 def build_parser() -> ArgumentParser:
     parser = ArgumentParser(
-        description="Train detector-only LoRA on the crack_segment YOLO segmentation dataset with Lightning 2.6.5."
+        description="Train detector-only LoRA on a YAML-configured YOLO segmentation dataset with Lightning 2.6.5."
     )
-    parser.add_argument("--dataset-root", type=Path, default=DEFAULT_DATASET_ROOT)
-    parser.add_argument("--train-split", type=str, default="train")
-    parser.add_argument("--val-split", type=str, default="val")
+    parser.add_argument("--data-yaml", type=Path, default=DEFAULT_DATA_YAML)
     parser.add_argument(
         "--prompt-mode", type=str, default="class_name", choices=["class_name", "generic"]
     )
@@ -78,9 +76,7 @@ def main() -> None:
     L.seed_everything(args.seed, workers=True)
 
     datamodule = CrackYoloSegDataModule(
-        dataset_root=args.dataset_root,
-        train_split=args.train_split,
-        val_split=args.val_split,
+        data_yaml=args.data_yaml,
         resolution=args.resolution,
         prompt_mode=args.prompt_mode,
         generic_prompt=args.generic_prompt,
@@ -91,15 +87,13 @@ def main() -> None:
     )
     datamodule.setup("fit")
     print(
-        f"dataset train_split={args.train_split} "
         f"samples={len(datamodule.train_dataset) if datamodule.train_dataset is not None else 0} "
-        f"root={args.dataset_root}"
+        f"yaml={args.data_yaml}"
     )
     if datamodule.val_dataset is not None:
         print(
-            f"dataset val_split={args.val_split} "
             f"samples={len(datamodule.val_dataset)} "
-            f"root={args.dataset_root}"
+            f"yaml={args.data_yaml}"
         )
 
     module = DetrLoraLightningModule(

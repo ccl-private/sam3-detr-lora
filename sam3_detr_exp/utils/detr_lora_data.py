@@ -8,11 +8,12 @@ import lightning as L
 import numpy as np
 import torch
 import torch.nn.functional as F
+import yaml
 from PIL import Image, ImageDraw
 from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import v2
 
-DEFAULT_DATASET_ROOT = Path("/slow_disk/ccl/data/crack_segment")
+DEFAULT_DATA_YAML = Path("/slow_disk/ccl/data/crack_segment/data.yaml")
 
 
 def image_transform(resolution: int) -> v2.Compose:
@@ -36,32 +37,56 @@ def xyxy_to_cxcywh_normalized(
     return [cx, cy, w, h]
 
 
-def parse_data_yaml(dataset_root: Path) -> dict[int, str]:
-    yaml_path = dataset_root / "data.yaml"
+@dataclass(frozen=True)
+class YoloDatasetConfig:
+    yaml_path: Path
+    train_dir: Path
+    val_dir: Path | None
+    class_names: dict[int, str]
+
+
+def parse_data_yaml(yaml_path: Path) -> YoloDatasetConfig:
+    yaml_path = yaml_path.expanduser().resolve()
     if not yaml_path.exists():
         raise FileNotFoundError(f"Missing dataset yaml: {yaml_path}")
 
-    names: dict[int, str] = {}
-    in_names = False
-    for raw_line in yaml_path.read_text().splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("names:"):
-            in_names = True
-            continue
-        if in_names:
-            if ":" not in line:
-                break
-            key, value = line.split(":", 1)
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            if key.isdigit():
-                names[int(key)] = value
+    raw = yaml.safe_load(yaml_path.read_text())
+    if not isinstance(raw, dict):
+        raise ValueError(f"Dataset yaml must contain a mapping: {yaml_path}")
 
-    if not names:
+    raw_names = raw.get("names")
+    if isinstance(raw_names, list):
+        names = {index: str(name) for index, name in enumerate(raw_names)}
+    elif isinstance(raw_names, dict):
+        names = {int(key): str(value) for key, value in raw_names.items()}
+    else:
         raise ValueError(f"Failed to parse class names from {yaml_path}")
-    return names
+
+    root_value = raw.get("path", ".")
+    dataset_root = Path(root_value).expanduser()
+    if not dataset_root.is_absolute():
+        dataset_root = yaml_path.parent / dataset_root
+    dataset_root = dataset_root.resolve()
+
+    def resolve_split(key: str, required: bool) -> Path | None:
+        value = raw.get(key)
+        if value in (None, ""):
+            if required:
+                raise ValueError(f"Missing required '{key}' entry in {yaml_path}")
+            return None
+        if not isinstance(value, str):
+            raise ValueError(f"'{key}' must be a directory path string in {yaml_path}")
+        split_path = Path(value).expanduser()
+        if not split_path.is_absolute():
+            split_path = dataset_root / split_path
+        return split_path.resolve()
+
+    return YoloDatasetConfig(
+        yaml_path=yaml_path,
+        train_dir=resolve_split("train", required=True),
+        val_dir=resolve_split("val", required=False),
+        class_names=names,
+    )
 
 
 def polygon_to_mask(
@@ -109,19 +134,18 @@ class YoloSegmentationDataset(Dataset):
 
     def __init__(
         self,
-        dataset_root: Path,
-        split: str,
+        split_dir: Path,
+        class_names: dict[int, str],
         resolution: int,
         prompt_mode: str,
         generic_prompt: str,
         max_samples: int | None = None,
     ):
-        self.dataset_root = dataset_root
-        self.split = split
+        self.split_dir = split_dir
         self.resolution = resolution
         self.prompt_mode = prompt_mode
         self.generic_prompt = generic_prompt
-        self.class_names = parse_data_yaml(dataset_root)
+        self.class_names = class_names
         self.transform = image_transform(resolution)
         self.records = self._build_records(max_samples=max_samples)
 
@@ -144,12 +168,11 @@ class YoloSegmentationDataset(Dataset):
     def _build_records(
         self, max_samples: int | None
     ) -> list[tuple[Path, int, list[list[float]]]]:
-        split_dir = self.dataset_root / self.split
-        if not split_dir.exists():
-            raise FileNotFoundError(f"Missing split directory: {split_dir}")
+        if not self.split_dir.exists():
+            raise FileNotFoundError(f"Missing split directory: {self.split_dir}")
 
         records: list[tuple[Path, int, list[list[float]]]] = []
-        for image_path in sorted(split_dir.iterdir()):
+        for image_path in sorted(self.split_dir.iterdir()):
             if image_path.suffix not in self.IMAGE_SUFFIXES:
                 continue
             label_path = image_path.with_suffix(".txt")
@@ -164,7 +187,7 @@ class YoloSegmentationDataset(Dataset):
                     return records
 
         if not records:
-            raise ValueError(f"No valid YOLO segmentation samples found in {split_dir}")
+            raise ValueError(f"No valid YOLO segmentation samples found in {self.split_dir}")
         return records
 
     def __len__(self) -> int:
@@ -218,9 +241,7 @@ def collate_samples(batch: list[Sample]) -> list[Sample]:
 class CrackYoloSegDataModule(L.LightningDataModule):
     def __init__(
         self,
-        dataset_root: Path = DEFAULT_DATASET_ROOT,
-        train_split: str = "train",
-        val_split: str = "val",
+        data_yaml: Path = DEFAULT_DATA_YAML,
         resolution: int = 1008,
         prompt_mode: str = "class_name",
         generic_prompt: str = "crack",
@@ -230,9 +251,7 @@ class CrackYoloSegDataModule(L.LightningDataModule):
         max_val_samples: int | None = None,
     ):
         super().__init__()
-        self.dataset_root = dataset_root
-        self.train_split = train_split
-        self.val_split = val_split
+        self.data_yaml = data_yaml
         self.resolution = resolution
         self.prompt_mode = prompt_mode
         self.generic_prompt = generic_prompt
@@ -245,20 +264,20 @@ class CrackYoloSegDataModule(L.LightningDataModule):
 
     def setup(self, stage: str | None = None) -> None:
         if stage in (None, "fit"):
+            config = parse_data_yaml(self.data_yaml)
             self.train_dataset = YoloSegmentationDataset(
-                dataset_root=self.dataset_root,
-                split=self.train_split,
+                split_dir=config.train_dir,
+                class_names=config.class_names,
                 resolution=self.resolution,
                 prompt_mode=self.prompt_mode,
                 generic_prompt=self.generic_prompt,
                 max_samples=self.max_train_samples,
             )
 
-            val_dir = self.dataset_root / self.val_split
-            if val_dir.exists():
+            if config.val_dir is not None and config.val_dir.exists():
                 self.val_dataset = YoloSegmentationDataset(
-                    dataset_root=self.dataset_root,
-                    split=self.val_split,
+                    split_dir=config.val_dir,
+                    class_names=config.class_names,
                     resolution=self.resolution,
                     prompt_mode=self.prompt_mode,
                     generic_prompt=self.generic_prompt,

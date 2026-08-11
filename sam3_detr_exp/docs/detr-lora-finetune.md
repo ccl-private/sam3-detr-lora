@@ -26,13 +26,25 @@
 
 当前训练代码只支持文本提示的 detector-only 数据组织，使用的是 YOLO segmentation 标注。
 
-### 目录结构
+### YAML 与目录结构
 
-`--dataset-root` 下需要至少有这些内容：
+训练入口通过 `--data-yaml` 指定数据配置，不再单独传 dataset root 或 split 名。YAML 示例：
+
+```yaml
+path: /data/my_dataset
+train: train
+val: val
+
+names:
+  0: linear crack
+  1: alligator crack
+  2: pothole
+```
+
+对应目录至少包含：
 
 ```text
-dataset_root/
-  data.yaml
+/data/my_dataset/
   train/
     0001.jpg
     0001.txt
@@ -45,7 +57,9 @@ dataset_root/
 
 说明：
 
-- `train/` 和 `val/` 是默认 split 名，可以通过 `--train-split` 和 `--val-split` 改
+- `path` 支持绝对路径；相对路径以 YAML 文件所在目录为基准
+- `train` 和 `val` 支持相对于 `path` 的路径，也支持绝对路径
+- `train` 必填，`val` 可省略
 - 当前实现假设“图片和标签在同一目录，同名不同后缀”
 - 不读取 `images/train`、`labels/train` 这种分层目录
 
@@ -66,7 +80,7 @@ dataset_root/
 
 ### `data.yaml` 格式
 
-当前至少要求能解析出 `names:`：
+当前要求 YAML 包含 `path`、`train` 和 `names`，验证时再提供 `val`：
 
 ```yaml
 names:
@@ -557,9 +571,7 @@ LoRA 和蒸馏是能叠加的。
 
 ```bash
 python sam3_detr_exp/train_detr_lora.py \
-  --dataset-root /slow_disk/ccl/data/crack_segment \
-  --train-split train \
-  --val-split val \
+  --data-yaml /slow_disk/ccl/data/crack_segment/data.yaml \
   --max-train-samples 1 \
   --max-val-samples 1 \
   --dry-run
