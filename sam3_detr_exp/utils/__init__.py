@@ -1,4 +1,4 @@
-from .detr_lora_data import CrackYoloSegDataModule, Sample
+from .detr_lora_data import CrackYoloSegDataModule, PromptTarget, Sample
 from .detr_lora_utils import (
     assert_modular_weights_exist,
     attach_lora_to_parametrizable_modules,
@@ -18,6 +18,7 @@ from .detr_lora_utils import (
 __all__ = [
     "CrackYoloSegDataModule",
     "Sample",
+    "PromptTarget",
     "assert_modular_weights_exist",
     "attach_lora_to_parametrizable_modules",
     "build_prompt",

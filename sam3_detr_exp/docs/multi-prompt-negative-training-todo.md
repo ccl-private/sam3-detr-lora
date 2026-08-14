@@ -12,7 +12,8 @@
 - 每张图片额外随机采样若干通用域外负提示，target 为空。
 - 训练策略由数据 YAML 决定，换数据集时不再修改训练代码。
 
-本 TODO 只记录未来改造方案，当前尚未实施。
+单图多类别提示、数据集内缺失类别负提示和通用域外负提示均已完成单卡与
+4 卡 DDP smoke test。
 
 ## 建议的 YAML 格式
 
@@ -66,18 +67,18 @@ prompt_training:
 
 ## 数据结构改造
 
-- [ ] 扩展 `YoloDatasetConfig`，解析并保存 `prompt_training` 配置。
-- [ ] 将 `YoloSegmentationDataset.records` 从“图片-类别”记录改为“一张图片一条记录”。
-- [ ] 一次解析并保存图片内所有类别的 polygon、box 和 mask。
-- [ ] 扩展或替换 `Sample`，使其保存唯一图片及多个 `PromptTarget`。
-- [ ] `PromptTarget` 至少包含 `text_prompt`、`gt_boxes`、`gt_masks` 和正/负类型。
-- [ ] 允许 `gt_boxes` 为 `[0, 4]`、`gt_masks` 为 `[0, H, W]` 的空 target。
-- [ ] `max_train_samples` / `max_val_samples` 明确定义为图片数量，不再是展开后的 prompt 数量。
+- [x] 扩展 `YoloDatasetConfig`，解析并保存 `prompt_training` 配置。
+- [x] 在 multi-prompt 模式下将 records 从“图片-类别”改为“一张图片一条记录”。
+- [x] 一次解析并保存图片内所有类别的 polygon、box 和 mask。
+- [x] 扩展 `Sample`，使其保存唯一图片及多个 `PromptTarget`。
+- [x] `PromptTarget` 包含 `text_prompt`、`gt_boxes`、`gt_masks` 和正/负类型。
+- [x] 允许 `gt_boxes` 为 `[0, 4]`、`gt_masks` 为 `[0, H, W]` 的空 target。
+- [x] multi-prompt 模式下 `max_train_samples` / `max_val_samples` 表示图片数量。
 
 ## Batch 与模型输入改造
 
-- [ ] collate 后保留 `B` 张唯一图片，同时将其提示展开成 `Q` 个 query。
-- [ ] `images` 的形状保持 `[B, 3, H, W]`，文本列表长度为 `Q`。
+- [x] collate 后保留 `B` 张唯一图片，同时将其提示展开成 `Q` 个 query。
+- [x] `images` 的形状保持 `[B, 3, H, W]`，文本列表长度为 `Q`。
 - [ ] 构造真实映射，例如两张图共五个提示时：
 
   ```text
@@ -85,29 +86,29 @@ prompt_training:
   text_ids = [0, 1, 2, 3, 4]
   ```
 
-- [ ] 修改 `make_find_stage`，接收上述 `img_ids` / `text_ids`，而不是默认一一对应。
-- [ ] 图像 backbone 只处理 `B` 张图片；文本 backbone 处理 `Q` 个提示。
-- [ ] 检查 segmentation head 是否通过 `img_ids` 正确复用对应图片特征。
-- [ ] batch size 的含义统一为“每卡图片数”，启动时打印唯一图片数、prompt 数和全局有效 prompt batch。
+- [x] 修改 `make_find_stage`，接收上述 `img_ids` / `text_ids`，而不是默认一一对应。
+- [x] 图像 backbone 只处理 `B` 张图片；文本 backbone 处理 `Q` 个提示。
+- [x] segmentation head 已在真实反传 smoke test 中通过 `img_ids` 复用图片特征。
+- [x] batch size 在 multi-prompt 模式下表示“每卡图片数”，日志记录图片数和 prompt 数。
 
 ## Target 与 loss 改造
 
-- [ ] `build_targets` 按展开后的 `Q` 个提示构造 target。
-- [ ] `num_boxes` 支持零目标提示。
-- [ ] padded box/object ID 的维度在整批全为空时也必须合法，避免 `max()` 或拼接失败。
-- [ ] mask 打包支持正负提示混合，并保持 matcher 返回索引与 packed mask 一致。
-- [ ] `is_exhaustive=True`，使缺失类别和通用负提示明确表示“该提示没有目标”。
+- [x] `build_targets` 按展开后的 `Q` 个提示构造 target。
+- [x] `num_boxes` 支持零目标提示。
+- [x] padded box/object ID 至少保留一个 padding slot，避免零维失败。
+- [x] mask 打包支持正负提示混合，并保持 matcher 与 packed mask 一致。
+- [x] `is_exhaustive=True`，使缺失类别明确表示“该提示没有目标”。
 - [ ] 验证官方 IABCE/presence loss 对空 target 的分类监督有效。
 - [ ] 验证 box、GIoU、mask、Dice loss 对空 target 返回有限的零值。
 - [ ] 验证主输出、5 层 auxiliary 输出和 O2M 输出都支持正负提示混合。
 
 ## 通用负提示规则
 
-- [ ] 过滤与任一数据集类别共享关键词的通用负提示，避免文本概念冲突。
-- [ ] 去除与当前图片正类提示完全相同或近似重复的负提示。
-- [ ] 训练阶段使用受 seed 控制的随机采样，DDP 下各 rank 行为可复现。
-- [ ] 验证阶段不得随机变化：使用固定采样或只验证全部数据集内类别。
-- [ ] 日志分别记录正提示、数据集内负提示、通用负提示的数量。
+- [x] 过滤与任一数据集类别共享关键词的通用负提示，避免文本概念冲突。
+- [x] 过滤后通用负提示不会与数据集类别提示重复。
+- [x] 训练阶段使用 Python RNG 随机采样，由 Lightning worker seed 控制复现。
+- [x] 验证阶段只使用全部数据集内类别，不加入随机通用负提示。
+- [x] 日志分别记录正提示、数据集内负提示、通用负提示的数量。
 
 ## 验证策略
 
@@ -166,11 +167,11 @@ GPU：4 × A800 80G
 - [ ] Dataset 单元测试：一张多类别图片生成正确的正/负提示及目标。
 - [ ] Dataset 单元测试：无标注图片、单类别图片、全类别图片均可加载。
 - [ ] Target 单元测试：整批全为空时 loss 有限且可反向传播。
-- [ ] 单卡 1 batch forward/backward smoke test。
-- [ ] 单卡正负提示混合的 auxiliary/O2M 分支 smoke test。
-- [ ] 4 卡 DDP 10 batch smoke test，无 unused parameter、NaN 或 OOM。
+- [x] 单卡 forward/backward smoke test（含 7 类 prompt 和 2 个通用负 prompt）。
+- [x] 单卡正负提示混合的 auxiliary/O2M 分支 smoke test。
+- [x] 4 卡 DDP 单步 smoke test，无 unused parameter、NaN 或 OOM。
 - [ ] 验证集重复运行两次，`val/loss` 在相同 checkpoint 下完全一致或仅有可解释的数值误差。
-- [ ] 日志显示唯一图片数、总 prompt 数、正提示数、两类负提示数。
+- [x] 日志显示唯一图片数、总 prompt 数、正提示数、两类负提示数。
 - [ ] 对 roadline 验证集和 `roadline_20260106` 固定图片做 base/旧 LoRA/新 LoRA 对比。
 
 ## 推荐实施顺序

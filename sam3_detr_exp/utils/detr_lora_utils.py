@@ -12,7 +12,7 @@ from sam3.model.data_misc import FindStage
 from sam3.train.loss.loss_fns import Boxes, CORE_LOSS_KEY, IABCEMdetr, Masks
 from sam3.train.matcher import BinaryHungarianMatcherV2
 from sam3_detr_exp.modular_pipeline import BPE_PATH, WEIGHTS_DIR, build_detector_model
-from sam3_detr_exp.utils.detr_lora_data import Sample
+from sam3_detr_exp.utils.detr_lora_data import PromptTarget, Sample
 
 ROOT = Path(__file__).resolve().parent.parent
 LORA_STATE_PREFIXES = ("dot_prod_scoring.", "segmentation_head.")
@@ -202,30 +202,32 @@ def set_frozen_module_modes(
         model.segmentation_head.eval()
 
 
-def make_find_stage(batch_size: int, device: torch.device) -> FindStage:
+def make_find_stage(img_ids: torch.Tensor, device: torch.device) -> FindStage:
+    img_ids = img_ids.to(device=device, dtype=torch.long)
+    num_prompts = len(img_ids)
     return FindStage(
-        img_ids=torch.arange(batch_size, device=device, dtype=torch.long),
-        text_ids=torch.arange(batch_size, device=device, dtype=torch.long),
-        input_boxes=torch.zeros(batch_size, 0, 4, device=device, dtype=torch.float32),
-        input_boxes_mask=torch.zeros(batch_size, 0, device=device, dtype=torch.bool),
-        input_boxes_label=torch.zeros(batch_size, 0, device=device, dtype=torch.long),
-        input_points=torch.empty(batch_size, 0, 2, device=device, dtype=torch.float32),
-        input_points_mask=torch.empty(batch_size, 0, device=device, dtype=torch.bool),
-        object_ids=[[] for _ in range(batch_size)],
+        img_ids=img_ids,
+        text_ids=torch.arange(num_prompts, device=device, dtype=torch.long),
+        input_boxes=torch.zeros(num_prompts, 0, 4, device=device, dtype=torch.float32),
+        input_boxes_mask=torch.zeros(num_prompts, 0, device=device, dtype=torch.bool),
+        input_boxes_label=torch.zeros(num_prompts, 0, device=device, dtype=torch.long),
+        input_points=torch.empty(num_prompts, 0, 2, device=device, dtype=torch.float32),
+        input_points_mask=torch.empty(num_prompts, 0, device=device, dtype=torch.bool),
+        object_ids=[[] for _ in range(num_prompts)],
     )
 
 
-def build_prompt(model: nn.Module, samples: list[Sample], device: torch.device):
-    prompt = model._get_dummy_prompt(num_prompts=len(samples))
+def build_prompt(model: nn.Module, num_prompts: int, device: torch.device):
+    prompt = model._get_dummy_prompt(num_prompts=num_prompts)
     return prompt
 
 
-def build_targets(samples: list[Sample], device: torch.device) -> dict[str, torch.Tensor]:
+def build_targets(samples: list[PromptTarget], device: torch.device) -> dict[str, torch.Tensor]:
     num_boxes = torch.tensor(
         [len(sample.gt_boxes) for sample in samples], dtype=torch.long, device=device
     )
     boxes = torch.cat([sample.gt_boxes for sample in samples], dim=0).to(device)
-    max_boxes = int(num_boxes.max().item())
+    max_boxes = max(1, int(num_boxes.max().item()))
     boxes_padded = torch.zeros(
         len(samples), max_boxes, 4, dtype=torch.float32, device=device
     )
@@ -234,9 +236,13 @@ def build_targets(samples: list[Sample], device: torch.device) -> dict[str, torc
     for idx, sample in enumerate(samples):
         count = len(sample.gt_boxes)
         boxes_padded[idx, :count] = sample.gt_boxes.to(device)
-        masks.append(sample.gt_masks.to(device))
-        valid_masks.append(torch.ones(count, dtype=torch.bool, device=device))
-    masks_tensor = torch.cat(masks, dim=0)
+        if count:
+            masks.append(sample.gt_masks.to(device))
+            valid_masks.append(torch.ones(count, dtype=torch.bool, device=device))
+    masks_tensor = (
+        torch.cat(masks, dim=0) if masks else
+        torch.zeros(0, 1, 1, dtype=torch.bool, device=device)
+    )
     target_is_valid_padded = torch.zeros(
         len(samples), max_boxes, dtype=torch.bool, device=device
     )
@@ -254,7 +260,10 @@ def build_targets(samples: list[Sample], device: torch.device) -> dict[str, torc
         "num_boxes": num_boxes,
         "is_exhaustive": torch.ones(len(samples), dtype=torch.bool, device=device),
         "masks": masks_tensor,
-        "is_valid_mask": torch.cat(valid_masks, dim=0),
+        "is_valid_mask": (
+            torch.cat(valid_masks, dim=0) if valid_masks else
+            torch.zeros(0, dtype=torch.bool, device=device)
+        ),
         "target_is_valid_padded": target_is_valid_padded,
     }
 

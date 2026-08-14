@@ -126,12 +126,13 @@ def main() -> None:
     )
     datamodule.setup("fit")
     print(
-        f"samples={len(datamodule.train_dataset) if datamodule.train_dataset is not None else 0} "
+        f"train samples={len(datamodule.train_dataset) if datamodule.train_dataset is not None else 0} "
+        f"mode={'multi_prompt' if datamodule.train_dataset and datamodule.train_dataset.multi_prompt else 'single_prompt'} "
         f"yaml={args.data_yaml}"
     )
     if datamodule.val_dataset is not None:
         print(
-            f"samples={len(datamodule.val_dataset)} "
+            f"val samples={len(datamodule.val_dataset)} "
             f"yaml={args.data_yaml}"
         )
 

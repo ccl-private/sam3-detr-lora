@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+import random
 
 import lightning as L
 import numpy as np
@@ -43,6 +44,7 @@ class YoloDatasetConfig:
     train_dir: Path
     val_dir: Path | None
     class_names: dict[int, str]
+    prompt_training: dict
 
 
 def parse_data_yaml(yaml_path: Path) -> YoloDatasetConfig:
@@ -86,6 +88,7 @@ def parse_data_yaml(yaml_path: Path) -> YoloDatasetConfig:
         train_dir=resolve_split("train", required=True),
         val_dir=resolve_split("val", required=False),
         class_names=names,
+        prompt_training=raw.get("prompt_training", {}) or {},
     )
 
 
@@ -111,12 +114,18 @@ def resize_binary_masks(masks: torch.Tensor, resolution: int) -> torch.Tensor:
 
 
 @dataclass
-class Sample:
-    image: torch.Tensor
+class PromptTarget:
     text_prompt: str
-    prompt_box_cxcywh: list[float] | None
     gt_boxes: torch.Tensor
     gt_masks: torch.Tensor
+    class_id: int | None
+    prompt_kind: str
+
+
+@dataclass
+class Sample:
+    image: torch.Tensor
+    prompts: list[PromptTarget]
     image_path: Path
 
 
@@ -139,6 +148,8 @@ class YoloSegmentationDataset(Dataset):
         resolution: int,
         prompt_mode: str,
         generic_prompt: str,
+        prompt_training: dict | None = None,
+        include_generic_negatives: bool = False,
         max_samples: int | None = None,
     ):
         self.split_dir = split_dir
@@ -146,6 +157,25 @@ class YoloSegmentationDataset(Dataset):
         self.prompt_mode = prompt_mode
         self.generic_prompt = generic_prompt
         self.class_names = class_names
+        self.prompt_training = prompt_training or {}
+        self.multi_prompt = self.prompt_training.get("mode", "single_prompt") == "multi_prompt"
+        self.include_generic_negatives = include_generic_negatives
+        self.num_generic_negatives = int(self.prompt_training.get("num_negatives", 0))
+        raw_generic_negatives = self.prompt_training.get("generic_negatives", []) or []
+        if not isinstance(raw_generic_negatives, list):
+            raise ValueError("prompt_training.generic_negatives must be a list")
+        category_words = {
+            word.lower()
+            for name in self.class_names.values()
+            for word in name.replace("_", " ").split()
+        }
+        self.generic_negatives = sorted({
+            str(name).strip().lower() for name in raw_generic_negatives
+            if str(name).strip()
+            and not set(str(name).strip().lower().split()) & category_words
+        })
+        if self.num_generic_negatives < 0:
+            raise ValueError("prompt_training.num_negatives must be non-negative")
         self.transform = image_transform(resolution)
         self.records = self._build_records(max_samples=max_samples)
 
@@ -167,11 +197,11 @@ class YoloSegmentationDataset(Dataset):
 
     def _build_records(
         self, max_samples: int | None
-    ) -> list[tuple[Path, int, list[list[float]]]]:
+    ) -> list[tuple[Path, dict[int, list[list[float]]]] | tuple[Path, int, list[list[float]]]]:
         if not self.split_dir.exists():
             raise FileNotFoundError(f"Missing split directory: {self.split_dir}")
 
-        records: list[tuple[Path, int, list[list[float]]]] = []
+        records = []
         for image_path in sorted(self.split_dir.iterdir()):
             if image_path.suffix not in self.IMAGE_SUFFIXES:
                 continue
@@ -179,6 +209,15 @@ class YoloSegmentationDataset(Dataset):
             if not label_path.exists():
                 continue
             grouped = self._parse_label_file(label_path)
+            if self.multi_prompt:
+                grouped = {
+                    class_id: polygons for class_id, polygons in grouped.items()
+                    if class_id in self.class_names and polygons
+                }
+                records.append((image_path, grouped))
+                if max_samples is not None and len(records) >= max_samples:
+                    return records
+                continue
             for class_id, polygons in grouped.items():
                 if class_id not in self.class_names or not polygons:
                     continue
@@ -194,42 +233,69 @@ class YoloSegmentationDataset(Dataset):
         return len(self.records)
 
     def __getitem__(self, index: int) -> Sample:
-        image_path, class_id, polygons = self.records[index]
+        record = self.records[index]
+        if self.multi_prompt:
+            image_path, grouped = record
+        else:
+            image_path, class_id, polygons = record
+            grouped = {class_id: polygons}
         image = Image.open(image_path).convert("RGB")
         width, height = image.size
-
-        gt_boxes = []
-        gt_masks = []
-        for coords in polygons:
-            xs_norm = coords[0::2]
-            ys_norm = coords[1::2]
-            xs = [min(max(x, 0.0), 1.0) * width for x in xs_norm]
-            ys = [min(max(y, 0.0), 1.0) * height for y in ys_norm]
-            if len(xs) < 3 or len(ys) < 3:
-                continue
-            x0, x1 = min(xs), max(xs)
-            y0, y1 = min(ys), max(ys)
-            if x1 <= x0 or y1 <= y0:
-                continue
-            gt_boxes.append(
-                xyxy_to_cxcywh_normalized(x0, y0, x1, y1, width, height)
-            )
-            gt_masks.append(polygon_to_mask(list(zip(xs, ys)), width, height))
-
-        if not gt_boxes:
-            raise ValueError(f"No valid polygons left after parsing {image_path}")
-
-        prompt_text = self.generic_prompt
-        if self.prompt_mode == "class_name":
-            prompt_text = self.class_names[class_id].replace("_", " ")
-
         image_tensor = self.transform(v2.functional.to_image(image))
+        class_ids = sorted(self.class_names) if self.multi_prompt else list(grouped)
+        prompts = []
+        for class_id in class_ids:
+            gt_boxes = []
+            gt_masks = []
+            for coords in grouped.get(class_id, []):
+                xs_norm = coords[0::2]
+                ys_norm = coords[1::2]
+                xs = [min(max(x, 0.0), 1.0) * width for x in xs_norm]
+                ys = [min(max(y, 0.0), 1.0) * height for y in ys_norm]
+                if len(xs) < 3 or len(ys) < 3:
+                    continue
+                x0, x1 = min(xs), max(xs)
+                y0, y1 = min(ys), max(ys)
+                if x1 <= x0 or y1 <= y0:
+                    continue
+                gt_boxes.append(
+                    xyxy_to_cxcywh_normalized(x0, y0, x1, y1, width, height)
+                )
+                gt_masks.append(polygon_to_mask(list(zip(xs, ys)), width, height))
+            if not self.multi_prompt and not gt_boxes:
+                raise ValueError(f"No valid polygons left after parsing {image_path}")
+            prompt_text = self.generic_prompt
+            if self.prompt_mode == "class_name":
+                prompt_text = self.class_names[class_id].replace("_", " ")
+            boxes_tensor = torch.tensor(gt_boxes, dtype=torch.float32).reshape(-1, 4)
+            masks_tensor = (
+                resize_binary_masks(torch.stack(gt_masks), self.resolution)
+                if gt_masks else torch.zeros(
+                    0, self.resolution, self.resolution, dtype=torch.bool
+                )
+            )
+            prompts.append(PromptTarget(
+                text_prompt=prompt_text,
+                gt_boxes=boxes_tensor,
+                gt_masks=masks_tensor,
+                class_id=class_id,
+                prompt_kind="positive" if gt_boxes else "in_domain_negative",
+            ))
+        if self.multi_prompt and self.include_generic_negatives:
+            count = min(self.num_generic_negatives, len(self.generic_negatives))
+            for prompt_text in random.sample(self.generic_negatives, count):
+                prompts.append(PromptTarget(
+                    text_prompt=prompt_text,
+                    gt_boxes=torch.zeros(0, 4, dtype=torch.float32),
+                    gt_masks=torch.zeros(
+                        0, self.resolution, self.resolution, dtype=torch.bool
+                    ),
+                    class_id=None,
+                    prompt_kind="generic_negative",
+                ))
         return Sample(
             image=image_tensor,
-            text_prompt=prompt_text,
-            prompt_box_cxcywh=None,
-            gt_boxes=torch.tensor(gt_boxes, dtype=torch.float32),
-            gt_masks=resize_binary_masks(torch.stack(gt_masks, dim=0), self.resolution),
+            prompts=prompts,
             image_path=image_path,
         )
 
@@ -271,6 +337,8 @@ class CrackYoloSegDataModule(L.LightningDataModule):
                 resolution=self.resolution,
                 prompt_mode=self.prompt_mode,
                 generic_prompt=self.generic_prompt,
+                prompt_training=config.prompt_training,
+                include_generic_negatives=True,
                 max_samples=self.max_train_samples,
             )
 
@@ -281,6 +349,8 @@ class CrackYoloSegDataModule(L.LightningDataModule):
                     resolution=self.resolution,
                     prompt_mode=self.prompt_mode,
                     generic_prompt=self.generic_prompt,
+                    prompt_training=config.prompt_training,
+                    include_generic_negatives=False,
                     max_samples=self.max_val_samples,
                 )
 

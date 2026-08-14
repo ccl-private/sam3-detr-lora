@@ -10,3 +10,19 @@ names:
   4: zebra crossing
   5: lane barrier
   6: road teeth marking
+
+prompt_training:
+  mode: multi_prompt
+  num_negatives: 2
+  generic_negatives:
+    - person
+    - dog
+    - cat
+    - chair
+    - table
+    - bottle
+    - phone
+    - bird
+    - flower
+    - window
+    - door

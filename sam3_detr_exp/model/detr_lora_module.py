@@ -132,7 +132,12 @@ class DetrLoraLightningModule(L.LightningModule):
         images = torch.stack([sample.image for sample in batch], dim=0).to(
             self.device, non_blocking=True
         )
-        texts = [sample.text_prompt for sample in batch]
+        prompt_targets = []
+        prompt_img_ids = []
+        for image_idx, sample in enumerate(batch):
+            prompt_targets.extend(sample.prompts)
+            prompt_img_ids.extend([image_idx] * len(sample.prompts))
+        texts = [target.text_prompt for target in prompt_targets]
         _reset_stale_decoder_caches(self.detector, self.device)
 
         with torch.no_grad():
@@ -140,8 +145,8 @@ class DetrLoraLightningModule(L.LightningModule):
             backbone_out.update(self.detector.backbone.forward_text(texts, device=self.device))
             backbone_out = _move_tensors_to_device(backbone_out, self.device)
 
-        find_input = make_find_stage(len(batch), self.device)
-        geometric_prompt = build_prompt(self.detector, batch, self.device)
+        find_input = make_find_stage(torch.tensor(prompt_img_ids), self.device)
+        geometric_prompt = build_prompt(self.detector, len(prompt_targets), self.device)
         with _external_matching(self.detector):
             outputs = self.detector.forward_grounding(
                 backbone_out=backbone_out,
@@ -149,7 +154,7 @@ class DetrLoraLightningModule(L.LightningModule):
                 find_target=None,
                 geometric_prompt=geometric_prompt,
             )
-        targets = build_targets(batch, self.device)
+        targets = build_targets(prompt_targets, self.device)
         if self.hparams.loss_mode == "sam3":
             loss, metrics = compute_sam3_losses(
                 outputs, targets, matcher=self.matcher,
@@ -202,6 +207,23 @@ class DetrLoraLightningModule(L.LightningModule):
                     batch_size=batch_size,
                     sync_dist=sync_dist,
                 )
+        self.log(
+            f"{stage}/num_prompts", float(len(prompt_targets)),
+            prog_bar=False, batch_size=batch_size, sync_dist=sync_dist,
+        )
+        prompt_kind_counts = {
+            kind: sum(target.prompt_kind == kind for target in prompt_targets)
+            for kind in ("positive", "in_domain_negative", "generic_negative")
+        }
+        self.log(
+            f"{stage}/num_images", float(batch_size),
+            prog_bar=False, batch_size=batch_size, sync_dist=sync_dist,
+        )
+        for kind, count in prompt_kind_counts.items():
+            self.log(
+                f"{stage}/num_{kind}_prompts", float(count),
+                prog_bar=False, batch_size=batch_size, sync_dist=sync_dist,
+            )
         return loss
 
     def training_step(self, batch, batch_idx):
