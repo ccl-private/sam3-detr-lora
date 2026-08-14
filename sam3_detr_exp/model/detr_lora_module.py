@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 
 import lightning as L
 import torch
 
-from sam3.train.matcher import BinaryHungarianMatcherV2
+from sam3.train.matcher import BinaryHungarianMatcherV2, BinaryOneToManyMatcher
 from sam3_detr_exp.utils import (
     assert_modular_weights_exist,
     build_prompt,
     build_targets,
+    build_sam3_loss_functions,
     build_trainable_detector,
     collect_trainable_parameters,
     compute_losses,
+    compute_sam3_losses,
     make_find_stage,
     save_lora_state,
     set_frozen_module_modes,
@@ -47,6 +50,20 @@ def _reset_stale_decoder_caches(detector, device: torch.device) -> None:
         decoder.coord_cache.clear()
 
 
+@contextmanager
+def _external_matching(detector):
+    """Keep SAM3 in train mode while delegating matching to this experiment."""
+    original_compute_matching = detector._compute_matching
+    original_back_convert = detector.back_convert
+    detector._compute_matching = lambda out, targets: None
+    detector.back_convert = lambda target: target
+    try:
+        yield
+    finally:
+        detector._compute_matching = original_compute_matching
+        detector.back_convert = original_back_convert
+
+
 class DetrLoraLightningModule(L.LightningModule):
     def __init__(
         self,
@@ -61,6 +78,7 @@ class DetrLoraLightningModule(L.LightningModule):
         attn_only: bool = False,
         train_dot_score: bool = False,
         train_seg_head: bool = False,
+        loss_mode: str = "simple",
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -91,6 +109,8 @@ class DetrLoraLightningModule(L.LightningModule):
             gamma=2.0,
             stable=False,
         )
+        self.o2m_matcher = BinaryOneToManyMatcher(alpha=0.3, threshold=0.4, topk=4)
+        self.sam3_loss_fns = build_sam3_loss_functions() if loss_mode == "sam3" else []
 
     def configure_optimizers(self):
         params = collect_trainable_parameters(self.detector)
@@ -103,6 +123,12 @@ class DetrLoraLightningModule(L.LightningModule):
         )
 
     def _shared_step(self, batch, stage: str):
+        if stage == "train":
+            set_frozen_module_modes(
+                self.detector,
+                train_dot_score=self.hparams.train_dot_score,
+                train_seg_head=self.hparams.train_seg_head,
+            )
         images = torch.stack([sample.image for sample in batch], dim=0).to(
             self.device, non_blocking=True
         )
@@ -116,20 +142,25 @@ class DetrLoraLightningModule(L.LightningModule):
 
         find_input = make_find_stage(len(batch), self.device)
         geometric_prompt = build_prompt(self.detector, batch, self.device)
-        outputs = self.detector.forward_grounding(
-            backbone_out=backbone_out,
-            find_input=find_input,
-            find_target=None,
-            geometric_prompt=geometric_prompt,
-        )
+        with _external_matching(self.detector):
+            outputs = self.detector.forward_grounding(
+                backbone_out=backbone_out,
+                find_input=find_input,
+                find_target=None,
+                geometric_prompt=geometric_prompt,
+            )
         targets = build_targets(batch, self.device)
-        loss, metrics = compute_losses(
-            outputs,
-            targets,
-            matcher=self.matcher,
-            resolution=self.hparams.resolution,
-            mask_weight=self.hparams.mask_weight,
-        )
+        if self.hparams.loss_mode == "sam3":
+            loss, metrics = compute_sam3_losses(
+                outputs, targets, matcher=self.matcher,
+                o2m_matcher=self.o2m_matcher, loss_fns=self.sam3_loss_fns,
+            )
+        else:
+            loss, metrics = compute_losses(
+                outputs, targets, matcher=self.matcher,
+                resolution=self.hparams.resolution,
+                mask_weight=self.hparams.mask_weight,
+            )
 
         batch_size = len(batch)
         sync_dist = stage == "val"
@@ -140,7 +171,14 @@ class DetrLoraLightningModule(L.LightningModule):
             batch_size=batch_size,
             sync_dist=sync_dist,
         )
-        for key in ("loss_cls", "loss_box", "loss_giou", "loss_mask"):
+        metric_keys = (
+            ("loss_cls", "loss_box", "loss_giou", "loss_mask")
+            if self.hparams.loss_mode == "simple"
+            else ("loss_ce", "presence_loss", "loss_bbox", "loss_giou", "loss_mask", "loss_dice")
+        )
+        for key in metric_keys:
+            if key not in metrics:
+                continue
             self.log(
                 f"{stage}/{key}",
                 metrics[key],
@@ -155,6 +193,15 @@ class DetrLoraLightningModule(L.LightningModule):
             batch_size=batch_size,
             sync_dist=sync_dist,
         )
+        for key in ("num_aux_outputs", "num_o2m_matches"):
+            if key in metrics:
+                self.log(
+                    f"{stage}/{key}",
+                    float(metrics[key]),
+                    prog_bar=False,
+                    batch_size=batch_size,
+                    sync_dist=sync_dist,
+                )
         return loss
 
     def training_step(self, batch, batch_idx):

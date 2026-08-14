@@ -9,6 +9,7 @@ import torch.nn.functional as F
 
 from sam3.model.box_ops import box_cxcywh_to_xyxy, generalized_box_iou
 from sam3.model.data_misc import FindStage
+from sam3.train.loss.loss_fns import Boxes, CORE_LOSS_KEY, IABCEMdetr, Masks
 from sam3.train.matcher import BinaryHungarianMatcherV2
 from sam3_detr_exp.modular_pipeline import BPE_PATH, WEIGHTS_DIR, build_detector_model
 from sam3_detr_exp.utils.detr_lora_data import Sample
@@ -184,7 +185,10 @@ def build_trainable_detector(
 def set_frozen_module_modes(
     model: nn.Module, train_dot_score: bool, train_seg_head: bool
 ) -> None:
-    model.eval()
+    # SAM3 gates decoder auxiliary and DAC one-to-many outputs on the root
+    # module's training flag. Keep the root in train mode while explicitly
+    # returning frozen feature extractors to eval mode.
+    model.train()
     model.transformer.train()
     model.backbone.eval()
     model.geometry_encoder.eval()
@@ -240,8 +244,15 @@ def build_targets(samples: list[Sample], device: torch.device) -> dict[str, torc
         target_is_valid_padded[idx, : len(sample.gt_boxes)] = True
     return {
         "boxes": boxes,
+        "boxes_xyxy": box_cxcywh_to_xyxy(boxes),
         "boxes_padded": boxes_padded,
+        "object_ids_padded": torch.where(
+            target_is_valid_padded,
+            torch.arange(max_boxes, device=device).expand(len(samples), -1),
+            -1,
+        ),
         "num_boxes": num_boxes,
+        "is_exhaustive": torch.ones(len(samples), dtype=torch.bool, device=device),
         "masks": masks_tensor,
         "is_valid_mask": torch.cat(valid_masks, dim=0),
         "target_is_valid_padded": target_is_valid_padded,
@@ -305,6 +316,97 @@ def compute_losses(
         "num_matches": int(len(src_idx)),
     }
     return loss, metrics
+
+
+def build_sam3_loss_functions() -> list[nn.Module]:
+    """Official SAM3 image losses, with the weights used by SAM3_LoRA."""
+    return [
+        Boxes(weight_dict={"loss_bbox": 5.0, "loss_giou": 2.0}),
+        IABCEMdetr(
+            pos_weight=10.0,
+            weight_dict={"loss_ce": 20.0, "presence_loss": 20.0},
+            pos_focal=False,
+            alpha=0.25,
+            gamma=2.0,
+            use_presence=True,
+            pad_n_queries=200,
+        ),
+        Masks(
+            weight_dict={"loss_mask": 200.0, "loss_dice": 10.0},
+            focal_alpha=0.25,
+            focal_gamma=2.0,
+            compute_aux=False,
+        ),
+    ]
+
+
+def _prepare_sam3_output(output: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    prepared = dict(output)
+    prepared["pred_boxes_xyxy"] = box_cxcywh_to_xyxy(prepared["pred_boxes"])
+    return prepared
+
+
+def compute_sam3_losses(
+    outputs: dict[str, torch.Tensor],
+    targets: dict[str, torch.Tensor],
+    matcher: BinaryHungarianMatcherV2,
+    o2m_matcher,
+    loss_fns: list[nn.Module],
+    o2m_weight: float = 2.0,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor | int]]:
+    """Apply SAM3's native box, IABCE/presence, focal-mask and Dice losses."""
+    output = _prepare_sam3_output(outputs)
+    indices = matcher(
+        output,
+        targets,
+        target_is_valid_padded=targets["target_is_valid_padded"],
+    )
+    num_boxes = targets["num_boxes"].sum().float().clamp(min=1)
+    total = output["pred_logits"].sum() * 0.0
+    metrics: dict[str, torch.Tensor | int] = {"num_matches": int(len(indices[1]))}
+
+    def add_losses(cur_output, cur_indices, suffix="", scale=1.0, is_aux=False):
+        nonlocal total
+        for loss_fn in loss_fns:
+            result = loss_fn(
+                outputs=cur_output,
+                targets=targets,
+                indices=cur_indices,
+                num_boxes=num_boxes,
+                is_aux=is_aux,
+            )
+            total = total + result.pop(CORE_LOSS_KEY) * scale
+            for key, value in result.items():
+                metrics[f"{key}{suffix}"] = value.detach()
+
+    add_losses(output, indices)
+
+    for idx, aux in enumerate(output.get("aux_outputs", [])):
+        if "pred_logits" not in aux or "pred_boxes" not in aux:
+            continue
+        aux = _prepare_sam3_output(aux)
+        aux_indices = matcher(
+            aux, targets,
+            target_is_valid_padded=targets["target_is_valid_padded"],
+        )
+        add_losses(aux, aux_indices, suffix=f"_aux_{idx}", is_aux=True)
+
+    if "pred_logits_o2m" in output and "pred_boxes_o2m" in output:
+        o2m = _prepare_sam3_output({
+            key[:-4]: value for key, value in output.items() if key.endswith("_o2m")
+        })
+        o2m_indices = o2m_matcher(
+            o2m,
+            targets,
+            target_is_valid_padded=targets["target_is_valid_padded"],
+        )
+        metrics["num_o2m_matches"] = int(len(o2m_indices[1]))
+        add_losses(o2m, o2m_indices, suffix="_o2m", scale=o2m_weight)
+
+    metrics["num_aux_outputs"] = len(output.get("aux_outputs", []))
+
+    metrics["loss"] = total.detach()
+    return total, metrics
 
 
 def _lora_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
