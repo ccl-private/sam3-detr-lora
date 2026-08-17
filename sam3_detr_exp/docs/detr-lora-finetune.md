@@ -1,5 +1,8 @@
 # SAM3 DETR LoRA Fine-Tuning Plan
 
+只需要执行训练时，直接查看独立的
+[DETR LoRA 训练命令手册](train-detr-lora-command.md)。
+
 ## Environment Baseline
 
 本实验目录当前以仓库根目录的 [requirements.txt](../../requirements.txt) 作为实际依赖基线。

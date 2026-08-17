@@ -1,187 +1,87 @@
-# Multi-prompt 与负提示训练 TODO
+# DETR LoRA 后续工作 TODO
 
-## 目标
+当前多提示训练、数据集内负提示、通用域外负提示、SAM3 原生 loss、
+auxiliary/O2M loss、固定验证 loss、best checkpoint 和 4 卡 DDP 训练均已实现。
+本文档只保留尚未完成的工作。
 
-让 `train_detr_lora.py` 通过数据 YAML 配置单图多提示训练，行为与本地
-`/slow_disk/ccl/codes/SAM3_LoRA/` 的 roadline 训练方式保持一致：
+## 1. 正式评估指标
 
-- 每张图片只计算一次视觉 backbone。
-- YAML 中的所有数据集类别都作为文本提示。
-- 图片中存在的类别使用对应实例作为正 target。
-- 图片中不存在的类别使用空 target，作为数据集内负提示。
-- 每张图片额外随机采样若干通用域外负提示，target 为空。
-- 训练策略由数据 YAML 决定，换数据集时不再修改训练代码。
+训练选优目前仍以固定提示集合上的 `val/loss` 为准。需要增加与最终视觉效果更直接相关的指标：
 
-单图多类别提示、数据集内缺失类别负提示和通用域外负提示均已完成单卡与
-4 卡 DDP smoke test。
+- [ ] 每类 box AP、precision 和 recall。
+- [ ] 每类 mask IoU 和 Dice。
+- [ ] 数据集内空提示的 false-positive rate。
+- [ ] 所有类别的 micro/macro 平均指标。
+- [ ] 将上述指标按 epoch 写入训练日志。
+- [ ] 评估使用综合检测/分割指标代替 `val/loss` 选择 best checkpoint。
 
-## 建议的 YAML 格式
+评估必须固定以下条件，避免不同实验之间无法比较：
 
-```yaml
-path: /slow_disk/ccl/data/roadline20251023
-train: video_disjoint/train
-val: video_disjoint/val
+- 相同验证集及样本顺序。
+- 相同类别提示词，不在验证阶段随机加入通用负提示。
+- 相同置信度阈值、NMS 和后处理设置。
+- 同时报告六项原始 loss、加权 loss 和最终任务指标。
 
-names:
-  0: white solid lane line
-  1: yellow solid lane line
-  2: white dashed lane line
-  3: yellow dashed lane line
-  4: zebra crossing
-  5: lane barrier
-  6: road teeth marking
+## 2. 固定回归对比
 
-prompt_training:
-  mode: multi_prompt
-  num_negatives: 2
-  generic_negatives:
-    - person
-    - dog
-    - cat
-    - chair
-    - table
-    - bottle
-    - phone
-    - bird
-    - flower
-    - window
-    - door
-```
+- [ ] 建立统一脚本，在同一进程和相同参数下依次测试 base、旧 LoRA、新 LoRA。
+- [ ] 固定使用 roadline 验证集和 `roadline/20260106` 前 10 张测试图。
+- [ ] 输出逐图/逐类检测数量、分数、可视化及汇总 CSV。
+- [ ] 加入检测框和 mask NMS，减少同一车道线的重复候选。
+- [ ] 评估长实线实例是否需要 mask 合并或专门的后处理。
 
-未设置 `prompt_training` 或设置 `mode: single_prompt` 时，应保持现有行为，
-确保旧数据 YAML 和旧命令兼容。
+已有人工测试结果可作为参考，但尚未形成可重复执行的正式回归工具。
 
-## 每张图片的提示组成
+## 3. 优化器与训练参数消融
 
-以 7 类 roadline 数据为例：
+以下参数已有命令行选项，不需要修改代码：
 
-1. 固定生成全部 7 个数据集内类别提示。
-2. 图中存在的类别关联该类别的 box 与 mask。
-3. 图中不存在的类别关联零个 box/mask，并设置为 exhaustive 空 target。
-4. 从 `generic_negatives` 随机采样 `num_negatives: 2` 个提示，关联空 target。
+- [ ] 使用 `--lora-rank 16 --lora-alpha 32 --lora-dropout 0.1` 训练对照实验。
+- [ ] 使用 `--lr 1e-4` 训练对照实验。
 
-因此每张图片通常产生 9 个提示：7 个数据集类别提示和 2 个通用负提示。
+以下能力尚未暴露或实现，需要先修改 `sam3_detr_exp` 内的训练代码：
 
-通用负提示必须确保在图像中确实不存在。roadline 数据不宜使用 `car`、
-`vehicle`、`road`、`asphalt` 等高概率真实出现的概念，否则会形成错误监督。
+- [ ] 增加 warmup steps 命令行参数，支持前 500 optimizer steps warmup。
+- [ ] 增加 cosine learning-rate scheduler。
+- [ ] 增加 `max_grad_norm` 命令行参数，并传给 Lightning Trainer 做梯度裁剪。
+- [ ] 在日志中记录每个 optimizer step 的实际 learning rate。
 
-## 数据结构改造
+建议按单变量消融实施，不要同时改变 LoRA 容量、学习率和调度策略：
 
-- [x] 扩展 `YoloDatasetConfig`，解析并保存 `prompt_training` 配置。
-- [x] 在 multi-prompt 模式下将 records 从“图片-类别”改为“一张图片一条记录”。
-- [x] 一次解析并保存图片内所有类别的 polygon、box 和 mask。
-- [x] 扩展 `Sample`，使其保存唯一图片及多个 `PromptTarget`。
-- [x] `PromptTarget` 包含 `text_prompt`、`gt_boxes`、`gt_masks` 和正/负类型。
-- [x] 允许 `gt_boxes` 为 `[0, 4]`、`gt_masks` 为 `[0, H, W]` 的空 target。
-- [x] multi-prompt 模式下 `max_train_samples` / `max_val_samples` 表示图片数量。
+1. 当前配置作为基线。
+2. 仅改 rank/alpha/dropout。
+3. 仅改初始 learning rate。
+4. 仅加入 gradient clipping。
+5. 再加入 warmup + cosine scheduler。
 
-## Batch 与模型输入改造
+## 4. 自动化测试
 
-- [x] collate 后保留 `B` 张唯一图片，同时将其提示展开成 `Q` 个 query。
-- [x] `images` 的形状保持 `[B, 3, H, W]`，文本列表长度为 `Q`。
-- [ ] 构造真实映射，例如两张图共五个提示时：
+### Dataset
 
-  ```text
-  img_ids  = [0, 0, 0, 1, 1]
-  text_ids = [0, 1, 2, 3, 4]
-  ```
+- [ ] 一张多类别图片能生成正确数量的正提示和空 target 负提示。
+- [ ] 无标注图片能够生成全部类别的空 target。
+- [ ] 单类别图片和包含全部类别的图片均能正确加载。
+- [ ] 通用负提示不会与数据集类别重复或共享冲突关键词。
+- [ ] `max_train_samples` 和 `max_val_samples` 在 multi-prompt 模式下按图片计数。
 
-- [x] 修改 `make_find_stage`，接收上述 `img_ids` / `text_ids`，而不是默认一一对应。
-- [x] 图像 backbone 只处理 `B` 张图片；文本 backbone 处理 `Q` 个提示。
-- [x] segmentation head 已在真实反传 smoke test 中通过 `img_ids` 复用图片特征。
-- [x] batch size 在 multi-prompt 模式下表示“每卡图片数”，日志记录图片数和 prompt 数。
+### Target 与 loss
 
-## Target 与 loss 改造
+- [ ] 整批 target 全为空时，IABCE/presence loss 有限且可反向传播。
+- [ ] 空 target 的 box、GIoU、mask 和 Dice loss 为有限零值。
+- [ ] 正负提示混合时，主输出、5 层 auxiliary 输出和 O2M 输出均能反向传播。
+- [ ] 对 loss 子项的权重与总和关系增加断言测试。
 
-- [x] `build_targets` 按展开后的 `Q` 个提示构造 target。
-- [x] `num_boxes` 支持零目标提示。
-- [x] padded box/object ID 至少保留一个 padding slot，避免零维失败。
-- [x] mask 打包支持正负提示混合，并保持 matcher 与 packed mask 一致。
-- [x] `is_exhaustive=True`，使缺失类别明确表示“该提示没有目标”。
-- [ ] 验证官方 IABCE/presence loss 对空 target 的分类监督有效。
-- [ ] 验证 box、GIoU、mask、Dice loss 对空 target 返回有限的零值。
-- [ ] 验证主输出、5 层 auxiliary 输出和 O2M 输出都支持正负提示混合。
+### 验证确定性
 
-## 通用负提示规则
+- [ ] 同一 checkpoint 连续运行两次验证，逐项 loss 一致或误差在规定容差内。
+- [ ] 4 卡验证结果与单卡验证结果在规定容差内一致。
+- [ ] 验证阶段确认 `num_generic_negative_prompts=0`。
 
-- [x] 过滤与任一数据集类别共享关键词的通用负提示，避免文本概念冲突。
-- [x] 过滤后通用负提示不会与数据集类别提示重复。
-- [x] 训练阶段使用 Python RNG 随机采样，由 Lightning worker seed 控制复现。
-- [x] 验证阶段只使用全部数据集内类别，不加入随机通用负提示。
-- [x] 日志分别记录正提示、数据集内负提示、通用负提示的数量。
+## 5. 推荐实施顺序
 
-## 验证策略
-
-建议验证阶段对每张图固定使用 YAML 的全部数据集类别，不加入随机通用负提示。
-这样各 epoch 的 `val/loss` 口径稳定，并同时考察：
-
-- 正类检出和分割质量。
-- 缺失类别误检抑制。
-- 白/黄、实线/虚线等相近类别的区分。
-- presence 与分类分数的校准。
-
-除 `val/loss` 外，后续应补充更直观的指标：
-
-- [ ] 每类 box AP / recall。
-- [ ] 每类 mask IoU / Dice。
-- [ ] 空提示 false-positive rate。
-- [ ] micro/macro 平均指标。
-- [ ] 相同图片上的 base、旧 LoRA、新 LoRA 可视化对比。
-
-最佳模型仍按固定口径的 `val/loss` 保存；具备 AP/IoU 后，应评估是否改用综合指标选 best。
-
-## 显存与推荐起始参数
-
-多提示会复用视觉 backbone，但 DETR、matcher 和 mask decoder 仍按提示数量扩展。
-7 个类别加 2 个通用负提示时，每张图片约对应 9 个 prompt，因此不能沿用当前每卡
-图片 batch 8。
-
-建议首次 smoke test：
-
-```text
-GPU：4 × A800 80G
-每卡图片 batch：1
-全局图片 batch：4
-每卡 prompt 数：约 9
-```
-
-确认峰值显存后再尝试每卡图片 batch 2。训练日志应输出每批实际 prompt 数，因为不同
-数据集类别数量或配置会改变显存占用。
-
-## 优化器对齐（可单独实施）
-
-开源 roadline 配置还使用了以下训练设置，它们不属于多提示功能本身，但做严格对照实验时
-应作为独立变量加入：
-
-- [ ] LoRA rank 16、alpha 32、dropout 0.1。
-- [ ] learning rate `1e-4`。
-- [ ] warmup 500 optimizer steps。
-- [ ] cosine learning-rate scheduler。
-- [ ] gradient clipping `max_grad_norm: 1.0`。
-
-不要同时改变数据组织、LoRA 容量和优化器后直接归因。建议先仅加入多提示和负提示，
-其他参数保持不变做消融对比。
-
-## 测试与验收
-
-- [ ] Dataset 单元测试：一张多类别图片生成正确的正/负提示及目标。
-- [ ] Dataset 单元测试：无标注图片、单类别图片、全类别图片均可加载。
-- [ ] Target 单元测试：整批全为空时 loss 有限且可反向传播。
-- [x] 单卡 forward/backward smoke test（含 7 类 prompt 和 2 个通用负 prompt）。
-- [x] 单卡正负提示混合的 auxiliary/O2M 分支 smoke test。
-- [x] 4 卡 DDP 单步 smoke test，无 unused parameter、NaN 或 OOM。
-- [ ] 验证集重复运行两次，`val/loss` 在相同 checkpoint 下完全一致或仅有可解释的数值误差。
-- [x] 日志显示唯一图片数、总 prompt 数、正提示数、两类负提示数。
-- [ ] 对 roadline 验证集和 `roadline_20260106` 固定图片做 base/旧 LoRA/新 LoRA 对比。
-
-## 推荐实施顺序
-
-1. YAML 解析及旧格式兼容。
-2. 一图一记录的数据集结构。
-3. 单图多正提示与 `img_ids` 映射。
-4. 数据集内缺失类别负提示。
-5. 空 target 的 matcher/loss 测试。
-6. 固定口径的多类别验证。
-7. 通用负提示及冲突过滤。
-8. 单卡、4 卡 smoke test。
-9. 与当前最佳 LoRA 做消融训练和可视化评估。
+1. 建立统一 base/旧 LoRA/新 LoRA 回归脚本。
+2. 增加 AP、recall、IoU、Dice 和空提示误检率。
+3. 补齐 Dataset、空 target 和验证确定性测试。
+4. 增加 gradient clipping、warmup 和 cosine scheduler。
+5. 按单变量方式完成训练参数消融。
+6. 根据任务指标决定是否改变 best checkpoint 的选取标准。

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from argparse import ArgumentParser
+import os
 from pathlib import Path
 import sys
 
@@ -18,6 +19,26 @@ from sam3_detr_exp.utils.detr_lora_data import DEFAULT_DATA_YAML
 
 EXP_ROOT = Path(__file__).resolve().parent
 LORA_DIR = EXP_ROOT / "weights_lora"
+
+
+def bind_local_cuda_device(accelerator: str) -> int | None:
+    """Bind each re-launched Lightning DDP worker before SAM3 is constructed."""
+    if accelerator != "gpu":
+        return None
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    device_count = torch.cuda.device_count()
+    if not 0 <= local_rank < device_count:
+        raise RuntimeError(
+            f"LOCAL_RANK={local_rank} is outside the {device_count} visible CUDA devices"
+        )
+    torch.cuda.set_device(local_rank)
+    print(
+        f"cuda binding: pid={os.getpid()} local_rank={local_rank} "
+        f"current_device={torch.cuda.current_device()} "
+        f"device={torch.cuda.get_device_name(local_rank)}",
+        flush=True,
+    )
+    return local_rank
 
 
 def default_best_path(last_path: Path) -> Path:
@@ -109,6 +130,7 @@ def main() -> None:
         raise RuntimeError("CUDA requested but not available.")
 
     if args.accelerator == "gpu":
+        bind_local_cuda_device(args.accelerator)
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
