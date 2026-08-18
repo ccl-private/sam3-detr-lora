@@ -72,7 +72,7 @@ prompt_training:
 
 multi-prompt 模式下，`max_*_samples` 和 `batch-size` 都按图片计数，不按展开后的提示词数量计数。
 
-### Loss 与可训练模块
+### 损失与可训练模块
 
 | 参数 | 含义 | 推荐值 |
 |---|---|---|
@@ -97,7 +97,7 @@ multi-prompt 模式下，`max_*_samples` 和 `batch-size` 都按图片计数，�
 
 当前脚本尚未实现 warmup、cosine scheduler 和梯度裁剪。命令中不要填写不存在的参数。
 
-### GPU、batch 与日志
+### GPU、批大小与日志
 
 | 参数 | 含义 | 4×A800 推荐值 |
 |---|---|---:|
@@ -141,7 +141,7 @@ Lightning 的逐 step/epoch 指标默认写入 `lightning_logs/version_*/metrics
 
 运行前需要确保日志目录已经存在。
 
-## 4. 典型示例一：新数据集 4 卡 dry-run
+## 4. 典型示例一：新数据集 4 卡试运行
 
 第一次使用新的 YAML 时，先限制样本并执行单步训练。这个命令只验证数据、正负提示、loss、
 4 卡 DDP 和 checkpoint 保存，不代表模型效果：
@@ -219,12 +219,12 @@ mask 对分辨率敏感。
 不同图片的实例数和有效 mask 数量不同，matcher 与分割头的临时显存会变化，因此主要显存不必
 完全相同。但启动后应只有 4 个唯一训练 PID，每个 rank 的主要模型显存应位于对应 GPU。
 
-### 终端看不到 loss
+### 终端看不到损失
 
 训练进度条会原地刷新。需要持久记录时查看 `lightning_logs/version_*/metrics.csv`，或使用 `tee`
 保存完整终端输出。`--log-every` 过大时，短 dry-run 不会产生逐 step 日志。
 
-### best loss 波动
+### 最佳损失波动
 
 当前 best checkpoint 按固定验证提示集合上的 `val/loss` 保存。应按 epoch 比较，不要根据单个
 train batch 的 loss 判断是否收敛。

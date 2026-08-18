@@ -1,4 +1,4 @@
-# DETR LoRA 后续工作 TODO
+# DETR LoRA 后续工作清单
 
 当前多提示训练、数据集内负提示、通用域外负提示、SAM3 原生 loss、
 auxiliary/O2M loss、固定验证 loss、best checkpoint 和 4 卡 DDP 训练均已实现。
@@ -56,7 +56,7 @@ auxiliary/O2M loss、固定验证 loss、best checkpoint 和 4 卡 DDP 训练均
 
 ## 4. 自动化测试
 
-### Dataset
+### 数据集
 
 - [ ] 一张多类别图片能生成正确数量的正提示和空 target 负提示。
 - [ ] 无标注图片能够生成全部类别的空 target。
@@ -64,7 +64,7 @@ auxiliary/O2M loss、固定验证 loss、best checkpoint 和 4 卡 DDP 训练均
 - [ ] 通用负提示不会与数据集类别重复或共享冲突关键词。
 - [ ] `max_train_samples` 和 `max_val_samples` 在 multi-prompt 模式下按图片计数。
 
-### Target 与 loss
+### 目标与损失
 
 - [ ] 整批 target 全为空时，IABCE/presence loss 有限且可反向传播。
 - [ ] 空 target 的 box、GIoU、mask 和 Dice loss 为有限零值。

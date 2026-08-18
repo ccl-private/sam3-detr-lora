@@ -1,9 +1,9 @@
-# SAM3 DETR LoRA Fine-Tuning Plan
+# SAM3 DETR LoRA 微调方案
 
 只需要执行训练时，直接查看独立的
 [DETR LoRA 训练命令手册](train-detr-lora-command.md)。
 
-## Environment Baseline
+## 环境基线
 
 本实验目录当前以仓库根目录的 [requirements.txt](../../requirements.txt) 作为实际依赖基线。
 
@@ -25,7 +25,7 @@
 
 当前最适合做 LoRA 的对象，不是整个 `sam3.pt`，而是模块化后的 detector 子模块。
 
-## Data Format Requirements
+## 数据格式要求
 
 当前训练代码只支持文本提示的 detector-only 数据组织，使用的是 YOLO segmentation 标注。
 
@@ -149,7 +149,7 @@ class_id x1 y1 x2 y2 x3 y3 ...
 
 推荐按下面这个优先级来做。
 
-### 第一优先级：只给 DETR transformer 加 LoRA
+### 第一优先级：只给 DETR 变换器加 LoRA
 
 对应模块：
 
@@ -169,7 +169,7 @@ class_id x1 y1 x2 y2 x3 y3 ...
 
 如果你是第一次做，建议先只改这里。
 
-### 第二优先级：允许少量 head 一起训练
+### 第二优先级：允许少量预测头一起训练
 
 可选模块：
 
@@ -234,7 +234,7 @@ class_id x1 y1 x2 y2 x3 y3 ...
 - 类别词驱动的目标检出
 - 开放词表或少样本类别迁移
 
-### 方案 B：框提示 refinement
+### 方案 B：框提示细化
 
 输入：
 
@@ -401,7 +401,7 @@ sample = {
 - 冻结默认不训练的参数
 - 只对目标 transformer 层挂 LoRA
 
-### 2. prompt 编码
+### 2. 提示编码
 
 尽量复用 detector 当前的 prompt 流程：
 
@@ -410,7 +410,7 @@ sample = {
 
 这样训练和推理路径一致，后面不会出现“训练用了一套，推理又是一套”。
 
-### 3. loss 计算
+### 3. 损失计算
 
 对 detector 输出做：
 
@@ -451,7 +451,7 @@ sample = {
 
 推理时有两种方式。
 
-### 方式 A：保留 LoRA 结构，运行时加载 adapter
+### 方式 A：保留 LoRA 结构，运行时加载适配器
 
 优点：
 
@@ -463,7 +463,7 @@ sample = {
 
 - 推理图里多一层 LoRA 逻辑
 
-### 方式 B：把 LoRA merge 回基础线性层
+### 方式 B：把 LoRA 合并回基础线性层
 
 优点：
 

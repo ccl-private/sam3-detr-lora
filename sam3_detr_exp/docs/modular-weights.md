@@ -1,4 +1,4 @@
-# SAM3 Modular Weights Guide
+# SAM3 模块化权重指南
 
 `sam3_detr_exp/weights_modular/*.pt` 保存的是各子模块的 `state_dict`，不是可直接裸执行的计算图。
 
@@ -10,7 +10,7 @@
 
 当前模块组装入口在 [modular_pipeline.py](../modular_pipeline.py)。
 
-## Final Layout
+## 最终目录结构
 
 当前 `sam3_detr_exp/` 最终只保留这条非 JIT 主线需要的内容：
 
@@ -37,7 +37,7 @@
 - `docs/modular-weights.md`
   - 本说明文档
 
-## Final Workflow
+## 最终工作流程
 
 ### 1. 导出模块权重
 
@@ -137,7 +137,7 @@ python sam3_detr_exp/compare_video_original_vs_modular.py \
 - `mp4` 是整段视频逐帧对比
 - `png` 是首帧预览，方便快速确认左右是否一致
 
-## How To Verify
+## 如何验证
 
 你现在只需要看两件事：
 
@@ -150,21 +150,21 @@ python sam3_detr_exp/compare_video_original_vs_modular.py \
    - 左右同一帧的目标 id / mask / box 是否基本一致
    - 遮挡、出入画、持续跟踪时是否明显分叉
 
-## End-to-End Data Flow
+## 端到端数据流
 
 下面这张图描述的是当前非 JIT `weights_modular` 主链的完整数据流。
 
 ```text
-Image / Video Frame
+图片 / 视频帧
         |
         v
 +-------------------+
-| preprocessing     |
-| resize / normalize|
+| 预处理            |
+| 缩放 / 归一化     |
 +-------------------+
         |
         v
-+-------------------+          Text Prompt
++-------------------+          文本提示
 | vision_backbone   |<-------------------+
 | .pt               |                    |
 +-------------------+                    |
@@ -189,9 +189,9 @@ Image / Video Frame
                                 | forward_text      |
                                 +-------------------+
                                            |
-                                           | text tokens
+                                           | 文本词元
                                            v
-                         Geometric Prompt / dummy prompt
+                              几何提示 / 空提示
                                            |
                                            v
                                 +-------------------+
@@ -199,11 +199,11 @@ Image / Video Frame
                                 | .pt               |
                                 +-------------------+
                                            |
-                                           | geo prompt tokens
+                                           | 几何提示词元
                                            v
                                 +-------------------+
                                 | _encode_prompt    |
-                                | text + geo concat |
+                                | 文本与几何提示拼接|
                                 +-------------------+
                                            |
                                            | prompt / prompt_mask
@@ -288,15 +288,15 @@ Image / Video Frame
 2. tracker
    `detector masks -> memory encoding -> temporal propagation -> video masks / ids / scores`
 
-## Detector Flow
+## 检测器流程
 
-下面这张图只看单帧 detector。
+下面这张图只展示单帧检测器。
 
 ```text
-image
+图片
   |
   v
-preprocess
+预处理
   |
   v
 vision_backbone.pt
@@ -307,12 +307,12 @@ vision_backbone.pt
   |    [B,256,72,72]
   |
   |--> vision_pos_enc:
-  |    same 3 scales
+  |    相同的 3 个尺度
   |
   `--> vision_features:
        [B,256,72,72]
 
-text prompt
+文本提示
   |
   v
 text_encoder.pt
@@ -321,7 +321,7 @@ text_encoder.pt
   |--> language_mask:     [B,Seq]
   `--> language_embeds:   [Seq,B,1024]
 
-geo prompt / dummy prompt
+几何提示 / 空提示
   |
   v
 geometry_encoder.pt
@@ -329,7 +329,7 @@ geometry_encoder.pt
   |--> geo_feats: [GeoSeq,B,256]
   `--> geo_masks: [B,GeoSeq]
 
-text tokens + geo tokens
+文本词元 + 几何词元
   |
   v
 _encode_prompt
@@ -337,7 +337,7 @@ _encode_prompt
   |--> prompt:      [PromptSeq,B,256]
   `--> prompt_mask: [B,PromptSeq]
 
-prompt + visual tokens
+提示词元 + 视觉词元
   |
   v
 transformer_encoder.pt
@@ -348,7 +348,7 @@ transformer_encoder.pt
   |--> spatial_shapes
   `--> valid_ratios
 
-memory + object queries
+记忆特征 + 对象查询
   |
   v
 transformer_decoder.pt
@@ -364,13 +364,13 @@ transformer_decoder.pt
                       |                           |
                       | pred_logits               | pred_masks
                       v                           v
-                 scores / logits            mask logits
+                   分数 / 输出值             掩码输出值
                       \                           /
                        \                         /
                         +-----------+-----------+
                                     |
                                     v
-                           detector outputs
+                            检测器输出
                            - pred_logits
                            - pred_boxes
                            - pred_boxes_xyxy
@@ -387,16 +387,16 @@ transformer_decoder.pt
 - `pred_boxes`: `[1,200,4]`
 - `pred_masks`: `[1,200,288,288]`
 
-## Tracker Flow
+## 跟踪器流程
 
-下面这张图只看视频 tracker。
+下面这张图只展示视频跟踪器。
 
 ```text
-detector outputs on current frame
+当前帧的检测器输出
   |
-  |--> selected masks
-  |--> selected scores
-  `--> selected boxes
+  |--> 选中的掩码
+  |--> 选中的分数
+  `--> 选中的边界框
           |
           v
 tracker_sam_heads.pt
@@ -423,11 +423,11 @@ tracker_maskmem_backbone.pt
   `--> vision_pos_enc:  [(B,64,72,72)]
           |
           v
-memory prompt assembly
+记忆提示组装
   |
-  |--> mask memory tokens
-  |--> object pointer tokens
-  `--> temporal position tokens
+  |--> 掩码记忆词元
+  |--> 对象指针词元
+  `--> 时序位置词元
           |
           v
 tracker_transformer.pt
@@ -437,10 +437,10 @@ tracker_transformer.pt
   `--> padding_mask
           |
           v
-propagated tracker state
+传播后的跟踪器状态
   |
   v
-video outputs per frame
+逐帧视频输出
   - out_obj_ids
   - out_probs
   - out_boxes_xywh
@@ -458,7 +458,7 @@ tracker 侧可以把模块边界理解成：
 3. `tracker_transformer`
    用 memory feature 和 pointer token 做时序传播
 
-## What Is Saved
+## 保存内容
 
 当前 `weights_modular/` 下的文件：
 
@@ -476,7 +476,7 @@ tracker 侧可以把模块边界理解成：
 这些文件都是模块参数，不包含 Python 结构定义。
 要恢复推理，必须用和原模块同构的 Python 类重新实例化，再 `load_state_dict(...)`。
 
-## Assembly Structure
+## 组装结构
 
 模块被分成两大块：
 
@@ -492,7 +492,7 @@ tracker 侧可以把模块边界理解成：
 - `Sam3TrackerPredictor` tracker
 - `Sam3VideoInferenceWithInstanceInteractivity` video model
 
-## Detector Modules
+## 检测器模块
 
 ### `vision_backbone.pt`
 
@@ -740,7 +740,7 @@ tracker 侧可以把模块边界理解成：
 说明：
 - 它只负责 mask，不负责框回归
 
-## Tracker Modules
+## 跟踪器模块
 
 ### `tracker_maskmem_backbone.pt`
 
@@ -855,7 +855,7 @@ tracker 侧可以把模块边界理解成：
   - `obj_ptr`: `[1, 256]`
   - `object_score_logits`: `[1, 1]`
 
-## Runtime Boundaries
+## 运行时边界
 
 如果从“未来独立拆 runtime”的角度看，当前最稳定的边界是：
 
@@ -881,7 +881,7 @@ tracker 侧可以把模块边界理解成：
 
 真正要完全脱离原仓库时，最重要的不是再多拆一个 `.pt` 文件，而是把第 3 部分单独固化下来。
 
-## What Is Already Verified
+## 已验证内容
 
 当前这条非 JIT 模块化链路已验证过：
 
@@ -889,7 +889,7 @@ tracker 侧可以把模块边界理解成：
 - assembled video model 可正常运行
 - 与原始 `sam3.pt` 的视频推理结果已做过逐帧一致性验证
 
-## Recommended Direction
+## 推荐方向
 
 如果你的目标是：
 

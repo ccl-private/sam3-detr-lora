@@ -1,0 +1,6 @@
+outputs/
+logs/
+weights_lora/
+weights_pretrained/
+__pycache__/
+lightning_logs/

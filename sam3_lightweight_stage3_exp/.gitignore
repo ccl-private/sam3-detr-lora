@@ -1,0 +1,11 @@
+# 模型权重、训练产物和文本特征由本地脚本生成，不提交到 Git。
+input/*.pt
+weights_lora/
+text_features/
+lightning_logs/
+
+# 测试输出和本地缓存可按 README 复现。
+tests/output/
+tests/.matplotlib/
+tests/__pycache__/
+__pycache__/
