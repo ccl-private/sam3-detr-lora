@@ -14,11 +14,15 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn as nn
 from PIL import Image, ImageDraw, ImageFont
 
 TEST_DIR = Path(__file__).resolve().parent
 EXP_DIR = TEST_DIR.parent
+PROJECT_ROOT = EXP_DIR.parent
 EFFICIENTSAM3_REPO = Path("/slow_disk/ccl/codes/efficientsam3")
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(EXP_DIR))
 sys.path.insert(0, str(EFFICIENTSAM3_REPO / "sam3"))
 
 from sam3.model.sam3_image_processor import Sam3Processor
@@ -35,12 +39,82 @@ PROMPTS = {
 }
 
 
+class LoRAParametrization(nn.Module):
+    """与训练脚本一致的权重增量结构，仅用于恢复测试权重。"""
+
+    def __init__(self, out_features: int, in_features: int, rank: int, alpha: float, dropout: float):
+        super().__init__()
+        self.scale = alpha / rank
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.lora_a = nn.Parameter(torch.empty(rank, in_features))
+        self.lora_b = nn.Parameter(torch.zeros(out_features, rank))
+
+    def forward(self, base_weight: torch.Tensor) -> torch.Tensor:
+        return base_weight + (self.lora_b @ self.lora_a) * self.scale
+
+
+def attach_lora(model: nn.Module, meta: dict) -> None:
+    import torch.nn.utils.parametrize as parametrize
+
+    rank = int(meta.get("lora_rank", 8))
+    alpha = float(meta.get("lora_alpha", 16.0))
+    dropout = float(meta.get("lora_dropout", 0.05))
+    include_encoder = not bool(meta.get("decoder_only", False))
+    include_ffn = not bool(meta.get("attn_only", False))
+    for name, module in model.transformer.named_modules():
+        selected = (include_encoder and name.startswith("encoder.layers.")) or name.startswith(
+            "decoder.layers."
+        )
+        if not selected:
+            continue
+        if isinstance(module, nn.MultiheadAttention):
+            parametrize.register_parametrization(
+                module,
+                "in_proj_weight",
+                LoRAParametrization(*module.in_proj_weight.shape, rank, alpha, dropout),
+            )
+            parametrize.register_parametrization(
+                module.out_proj,
+                "weight",
+                LoRAParametrization(*module.out_proj.weight.shape, rank, alpha, dropout),
+            )
+        elif include_ffn and isinstance(module, nn.Linear) and name.endswith(("linear1", "linear2")):
+            parametrize.register_parametrization(
+                module,
+                "weight",
+                LoRAParametrization(*module.weight.shape, rank, alpha, dropout),
+            )
+
+
 def sync() -> None:
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
 
-def load_model(name: str, device: str):
+def load_model(name: str, device: str, stage3_lora: Path | None = None):
+    if name == "stage3_lora":
+        if stage3_lora is None:
+            raise ValueError("测试 stage3_lora 时必须提供 --stage3-lora")
+        payload = torch.load(stage3_lora, map_location="cpu", weights_only=False)
+        meta = payload.get("meta", {})
+        model = build_efficientsam3_image_model(
+            checkpoint_path=str(EXP_DIR / "input/efficientsam3_efficientvit_stage3.pt"),
+            load_from_HF=False,
+            backbone_type="efficientvit",
+            model_name="b1",
+            text_encoder_type="MobileCLIP-S0",
+            text_encoder_context_length=16,
+            enable_segmentation=True,
+            enable_inst_interactivity=False,
+            device="cpu",
+        )
+        attach_lora(model, meta)
+        missing, unexpected = model.load_state_dict(payload["state_dict"], strict=False)
+        missing = [key for key in missing if "parametrizations" in key]
+        unexpected = [key for key in unexpected if "parametrizations" in key]
+        if missing or unexpected:
+            print(f"LoRA 加载提示：missing={len(missing)}, unexpected={len(unexpected)}", flush=True)
+        return model.to(device).eval()
     if name == "stage3":
         return build_efficientsam3_image_model(
             checkpoint_path=str(EXP_DIR / "input/efficientsam3_efficientvit_stage3.pt"),
@@ -145,6 +219,7 @@ def main() -> None:
     parser.add_argument("--images", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=TEST_DIR / "output/roadline_comparison")
     parser.add_argument("--models", nargs="+", default=["stage3", "stage1", "base"])
+    parser.add_argument("--stage3-lora", type=Path)
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--device", default="cuda")
@@ -170,7 +245,7 @@ def main() -> None:
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
         load_start = time.perf_counter()
-        model = load_model(model_name, args.device)
+        model = load_model(model_name, args.device, args.stage3_lora)
         sync()
         load_seconds = time.perf_counter() - load_start
         parameters = sum(parameter.numel() for parameter in model.parameters())
