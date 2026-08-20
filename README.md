@@ -3,7 +3,9 @@
 本仓库的目标是把SAM3 Base在道路标线文本提示分割上的能力迁移到轻量模型。实验不是五个互不相关的目录，而是一条按结果逐步调整的路线：
 
 ```text
-0. Base + DETR LoRA：建立效果上限和蒸馏教师
+0. SAM3 Base模块化与DETR LoRA
+   ├── 把完整SAM3拆成可独立加载和重组的功能模块
+   └── 在模块化DETR上完成道路标线LoRA微调
    ↓
 1. 早期TinyViT-S：验证轻量模型、固定词表和LoRA训练链路
    ↓
@@ -23,15 +25,26 @@
 
 下面按真实实验先后说明每一步为什么开始、从哪里继续以及为什么进入下一步。详细命令、代码结构和完整指标放在对应实验目录的README中。
 
-## 0. 建立Base教师和效果上限
+## 0. SAM3 Base模块化与DETR LoRA
 
 对应目录：[sam3_detr_exp](sam3_detr_exp/README.md)
 
-- 起点：原始SAM3 Base模块化权重。
-- 改动：在DETR Encoder/Decoder挂载r8 LoRA，同时训练点积分类头和分割头。
+这是项目最早的主实验，本身包含两个连续且都已成功的阶段，并不是为了蒸馏临时建立的对照组。
+
+### 0.1 SAM3模块拆分
+
+- 起点：原始完整`sam3.pt`。
+- 目标：把大checkpoint拆成视觉骨干、文本编码器、Transformer Encoder/Decoder、分割头、几何编码器、点积分类头和跟踪器等10个模块。
+- 测试：分别重组detector、tracker和video predictor，并对比原始模型与模块化模型的图像、视频推理链路。
+- 结论：模块拆分、独立加载和重新组装成功，模块化推理链路可用；这为后续只训练或替换DETR等局部模块建立了工程基础。
+
+### 0.2 SAM3 DETR LoRA微调
+
+- 起点：0.1导出的SAM3 Base模块化权重。
+- 改动：在DETR Encoder/Decoder挂载r8 LoRA，同时训练点积分类头和分割头；图像与文本骨干保持冻结。
 - 训练：日志显示完成8轮验证（epoch 0～7），epoch 8未完成；最佳验证loss出现在epoch 4。现有记录没有注明提前停止原因。
 - 统一10图结果：白实线IoU/Recall为0.7235/0.7883，白虚线为0.6808/0.8226，两类平均IoU为0.7021。
-- 结论：这是当前道路标线效果上限，后续蒸馏都使用该最佳LoRA作为教师。
+- 结论：SAM3 DETR LoRA道路标线微调成功。在不训练Base图像与文本骨干的情况下，模型获得了很强的道路标线文本提示分割能力。该最佳权重随后才被复用为轻量化实验的效果上限和蒸馏教师。
 
 ## 1. 早期TinyViT-S可行性实验
 
@@ -135,7 +148,7 @@
 
 | 目录 | 在路线中的位置 |
 |---|---|
-| [sam3_detr_exp](sam3_detr_exp/README.md) | 第0步：Base教师和效果上限 |
+| [sam3_detr_exp](sam3_detr_exp/README.md) | 第0步：成功完成SAM3模块拆分与DETR LoRA微调；后来兼作教师和效果上限 |
 | [sam3_lightweight_exp](sam3_lightweight_exp/README.md) | 第1步：早期轻量化可行性验证 |
 | [sam3_lightweight_stage3_exp](sam3_lightweight_stage3_exp/README.md) | 第2步：EfficientViT Stage-3直接LoRA基线 |
 | [sam3_lightweight_stage3_distill_exp](sam3_lightweight_stage3_distill_exp/README.md) | 第3步：EfficientViT最终输出蒸馏 |
@@ -143,7 +156,8 @@
 
 ## 当前结论与下一步
 
-- Base + DETR LoRA仍是效果上限，主要差距集中在白虚线召回。
+- 项目早期已经成功完成SAM3模块拆分、重组验证和Base DETR LoRA道路标线微调；轻量化实验建立在这一成功结果上。
+- Base + DETR LoRA目前仍是效果上限，轻量模型的主要差距集中在白虚线召回。
 - EfficientViT路线完整训练后效果不足，输出蒸馏也没有形成可量化改善，因此已经转向TinyViT。
 - TinyViT的最终输出KD、图像特征KD和扩大图像LoRA覆盖范围都带来连续小幅提升，但尚未接近Base。
 - 当前已完成的最佳轻量方案是P2；下一步是正式训练P3，并按同一10图口径判断图像r16是否带来超过P2续训噪声的增益。
