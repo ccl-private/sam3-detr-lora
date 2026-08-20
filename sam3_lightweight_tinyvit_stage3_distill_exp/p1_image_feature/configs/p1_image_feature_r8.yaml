@@ -1,0 +1,24 @@
+experiment: TinyViT-Stage3-P1-ImageFeature-R8
+initial_weights: ../../weights/p0_image_lora_r8.best.pt
+
+image_feature_distillation:
+  source: base_backbone_fpn
+  levels: 3
+  original_shapes: [[256, 288, 288], [256, 144, 144], [256, 72, 72]]
+  cached_shapes: [[256, 72, 72], [256, 36, 36], [256, 18, 18]]
+  pool_factor: 4
+  loss: normalized_cosine
+  level_weights: [1.0, 1.0, 1.0]
+  image_feature_kd_weight: 1.0
+  foreground_weight: 4.0
+  adapter: false
+
+training:
+  keep_p0_final_output_kd: true
+  epochs: 10
+  batch_size_per_gpu: 4
+  devices: 4
+  lora_lr: 5.0e-5
+  image_lora_lr: 1.0e-5
+  head_lr: 2.0e-5
+  precision: bf16-mixed

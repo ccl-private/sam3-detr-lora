@@ -223,6 +223,7 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--skip-visualizations", action="store_true", help="只保存指标，不生成图片")
     args = parser.parse_args()
 
     if args.device.startswith("cuda") and not torch.cuda.is_available():
@@ -306,9 +307,14 @@ def main() -> None:
                     aggregate[f"{key}|gt"] += gt_pixels
                     aggregate[f"{key}|detections"] += len(scores)
                     aggregate[f"{key}|positive_gt_images"] += int(gt_pixels > 0)
-                    output_dir = args.output / "visualizations" / model_name / prompt.replace(" ", "_")
-                    output_dir.mkdir(parents=True, exist_ok=True)
-                    render_comparison(image, gt, pred).save(output_dir / f"{path.stem}.jpg", quality=90)
+                    if not args.skip_visualizations:
+                        output_dir = (
+                            args.output / "visualizations" / model_name / prompt.replace(" ", "_")
+                        )
+                        output_dir.mkdir(parents=True, exist_ok=True)
+                        render_comparison(image, gt, pred).save(
+                            output_dir / f"{path.stem}.jpg", quality=90
+                        )
                     print(
                         f"{model_name} | {path.name} | {prompt} | "
                         f"检测={len(scores)} IoU={row['iou']:.4f}",

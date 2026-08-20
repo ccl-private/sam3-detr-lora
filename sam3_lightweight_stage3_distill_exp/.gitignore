@@ -1,0 +1,6 @@
+cache/
+logs/
+weights/
+tests/output/
+__pycache__/
+*.pyc

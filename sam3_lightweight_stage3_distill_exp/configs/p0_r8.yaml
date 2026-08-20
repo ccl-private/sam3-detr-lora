@@ -1,0 +1,37 @@
+experiment: P0-R8
+data_yaml: ../sam3_lightweight_stage3_exp/configs/roadline_lora.yaml
+teacher_lora: ../sam3_detr_exp/weights_lora/roadline_r8_a16_lr2e4.best.pt
+student_lora: ../sam3_lightweight_stage3_exp/weights_lora/roadline_stage3_ev_m.best.pt
+student_checkpoint: ../sam3_lightweight_stage3_exp/input/efficientsam3_efficientvit_stage3.pt
+
+model:
+  lora_rank: 8
+  lora_alpha: 16
+  lora_dropout: 0.05
+  train_dot_score: true
+  train_seg_head: true
+
+distillation:
+  final_output_only: true
+  temperature: 2.0
+  kd_weight: 1.0
+  kd_warmup_ratio: 0.05
+  quality_threshold: 0.2
+  weights:
+    query_classification: 1.0
+    presence: 1.0
+    box_l1: 1.0
+    box_giou: 1.0
+    mask_soft_bce: 2.0
+    mask_soft_dice: 1.0
+
+training:
+  epochs: 10
+  batch_size: 4
+  resolution: 1008
+  lora_lr: 5.0e-5
+  head_lr: 2.0e-5
+  weight_decay: 1.0e-2
+  gradient_clip_norm: 1.0
+  precision: bf16-mixed
+  seed: 42

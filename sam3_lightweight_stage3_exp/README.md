@@ -81,6 +81,8 @@ bash tests/run_person.sh /path/to/image.jpg tests/output/person.png
 
 本目录已经迁移 `sam3_lightweight_exp/` 的道路标线 LoRA 训练方案，并将基模替换为作者发布的 Stage-3 EV-M。训练时保持 EfficientViT-B1 图像编码器和 MobileCLIP-S0 文本编码器冻结，在 DETR Transformer 的注意力层与前馈层挂载 LoRA；可通过参数额外训练点积打分头和分割头。
 
+正式训练从官方Stage-3 EV-M开始，完成计划的20轮（epoch 0～19），没有提前停止。`lightning_logs/lightning_logs/version_2/metrics.csv`中的最低验证损失为epoch 10的7.1777。使用最佳权重进行统一10图、阈值0.5复测后，白实线IoU/Recall为0.3905/0.5137，白虚线为0.2153/0.2403。结论是：完整20轮DETR LoRA训练明显改善了领域响应，但仍显著落后Base + DETR LoRA，尤其是白虚线召回。
+
 默认采用实时文本模式：每个训练批次直接调用 Stage-3 自带的 MobileCLIP-S0 提取提示词特征。当前无需提前导出固定词表，也不会替换作者的轻量化文本编码器。
 
 ### 单卡冒烟测试

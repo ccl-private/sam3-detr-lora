@@ -1,0 +1,24 @@
+experiment: TinyViT-Stage3-P2-Image-Stage123-R8
+initial_weights: ../../weights/p1_image_feature_r8.best.pt
+
+image_lora:
+  rank: 8
+  alpha: 16
+  stages: [1, 2, 3]
+  targets: [attn.qkv, attn.proj, mlp.fc1, mlp.fc2]
+  newly_initialized_stage: 1
+  inherited_stages: [2, 3]
+
+distillation:
+  keep_p0_final_output_kd: true
+  keep_three_level_image_feature_kd: true
+  image_feature_kd_weight: 1.0
+  foreground_weight: 4.0
+
+training:
+  epochs: 10
+  batch_size_per_gpu: 4
+  devices: 4
+  detr_lora_rank: 8
+  image_lora_lr: 1.0e-5
+  precision: bf16-mixed

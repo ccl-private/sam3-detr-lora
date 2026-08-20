@@ -1,299 +1,61 @@
-# SAM3 DETR Modular and LoRA
+# SAM3 道路标线轻量化实验总览
 
-这个仓库当前主要整理的是 [`sam3_detr_exp`](sam3_detr_exp/) 这条实验主线，目标很直接：
+本仓库围绕SAM3道路标线文本提示分割，依次验证Base DETR LoRA、早期TinyViT轻量化、EfficientViT Stage-3、EfficientViT蒸馏和TinyViT Stage-3蒸馏。
 
-- 把原始 `sam3.pt` 拆成清楚的模块
-- 保持非 JIT、可继续训练、可单独替换模块
-- 验证模块化推理结果和原始 SAM3 一致
-- 在 modular DETR 上做 LoRA 微调，并直观看到前后效果变化
+根README只负责实验导航和横向结论。每个实验的模型结构、下载方式、训练命令、测试配置、权重与完整指标均记录在对应的`*exp/README.md`中。实验代码和产物只应放在所属实验目录内。
 
-如果你是第一次看这个项目，先从这里开始就够了。
+## 实验目录
 
-## Environment
+| 实验目录 | 实验内容 | 当前作用 | 详细文档 |
+|---|---|---|---|
+| `sam3_detr_exp/` | SAM3 Base模块化、DETR LoRA道路标线训练 | 效果上限与蒸馏教师 | [进入实验](sam3_detr_exp/README.md) |
+| `sam3_lightweight_exp/` | 早期TinyViT-S固定词表与DETR LoRA | 第一代轻量化探索 | [进入实验](sam3_lightweight_exp/README.md) |
+| `sam3_lightweight_stage3_exp/` | 官方EfficientViT Stage-3 EV-M评测与LoRA | 官方Stage-3轻量基线 | [进入实验](sam3_lightweight_stage3_exp/README.md) |
+| `sam3_lightweight_stage3_distill_exp/` | Base向EfficientViT Stage-3进行P0输出蒸馏 | EfficientViT蒸馏路线 | [进入实验](sam3_lightweight_stage3_distill_exp/README.md) |
+| `sam3_lightweight_tinyvit_stage3_distill_exp/` | Base向TinyViT Stage-3进行输出和图像特征蒸馏 | 当前轻量化主实验 | [进入实验](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) |
 
-当前项目依赖以本地虚拟环境 `/slow_disk/ccl/codes/sam3/.venv` 为准，不再以原始 SAM3 上游仓库的 `pyproject.toml` 为准。
-
-当前验证环境：
-
-- Python `3.13.11`
-- PyTorch `2.10.0+cu128`
-- TorchVision `0.25.0+cu128`
-- Lightning `2.6.5`
-
-对应依赖已经固化到根目录 [requirements.txt](requirements.txt)。
-
-安装方式：
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-pip install -e .
-```
-
-说明：
-
-- `requirements.txt` 直接来自当前可运行环境的 `pip freeze`
-- 这是锁版本环境，不是最小依赖集合
-- 里面包含 CUDA 12.8 对应的 torch、torchvision 和 NVIDIA 运行库
-- 如果你切换 Python 大版本、CUDA 版本或驱动，建议重新导出一份
-
-## Project Layout
-
-### [`sam3_detr_exp/run_video_det_modular.py`](sam3_detr_exp/run_video_det_modular.py)
-
-从原始 `sam3.pt` 导出模块化权重，生成 `sam3_detr_exp/weights_modular/*.pt`。
-
-默认行为：
-
-- 默认读取仓库根目录的 `sam3.pt`
-- 默认输出到 `sam3_detr_exp/weights_modular/`
-- 当前会拆成 10 个模块：
-  - `vision_backbone`
-  - `text_encoder`
-  - `transformer_encoder`
-  - `transformer_decoder`
-  - `segmentation_head`
-  - `geometry_encoder`
-  - `dot_product_scoring`
-  - `tracker_sam_heads`
-  - `tracker_maskmem_backbone`
-  - `tracker_transformer`
-
-```bash
-source /slow_disk/ccl/codes/sam3/.venv/bin/activate
-python sam3_detr_exp/run_video_det_modular.py
-```
-
-如果原始 checkpoint 不在仓库根目录，可以显式指定：
-
-```bash
-python sam3_detr_exp/run_video_det_modular.py \
-  --checkpoint /path/to/sam3.pt \
-  --output-dir sam3_detr_exp/weights_modular
-```
-
-### [`sam3_detr_exp/modular_pipeline.py`](sam3_detr_exp/modular_pipeline.py)
-
-模块化组装核心。负责把各个 `*.pt` 权重重新拼成 detector、tracker 和 video predictor。
-
-常用入口：
-
-- `build_detector_modules()`
-- `build_detector_model()`
-- `build_tracker_modules()`
-- `build_tracker_model()`
-- `build_video_model()`
-- `ModularVideoPredictor`
-
-### [`sam3_detr_exp/run_detr_prompt_inference.py`](sam3_detr_exp/run_detr_prompt_inference.py)
-
-只跑 detector 提示推理，支持文本提示和框提示，也支持加载 LoRA。
-
-数据格式要求：
-
-- `--image` 必须是单张 RGB 图像
-- 支持扩展名：
-  - `.jpg`
-  - `.jpeg`
-  - `.png`
-  - `.bmp`
-- 文本提示用 `--text`
-- 框提示用 `--box x0,y0,x1,y1`
-- `--box` 是原图像素坐标，不是归一化坐标
-- `--text` 和 `--box` 二选一，不能同时传
-
-文本提示：
-
-```bash
-python sam3_detr_exp/run_detr_prompt_inference.py \
-  --image assets/images/test_image.jpg \
-  --text shoe \
-  --output sam3_detr_exp/outputs/detr_text_prompt.png
-```
-
-加载 LoRA：
-
-```bash
-python sam3_detr_exp/run_detr_prompt_inference.py \
-  --image assets/images/test_image.jpg \
-  --text "linear crack" \
-  --lora sam3_detr_exp/weights_lora/detr_transformer_lora.pt \
-  --output sam3_detr_exp/outputs/detr_text_prompt_lora.png
-```
-
-### [`sam3_detr_exp/compare_image_original_vs_modular.py`](sam3_detr_exp/compare_image_original_vs_modular.py)
-
-对比原始 `sam3.pt` 和模块化 detector 在同一张图上的结果。
-
-数据格式要求：
-
-- `--image` 是单张 RGB 图像
-- 默认示例是 `assets/images/test_image.jpg`
-- `--prompt` 是文本提示词，例如 `shoe`
-
-```bash
-python sam3_detr_exp/compare_image_original_vs_modular.py \
-  --image assets/images/test_image.jpg \
-  --prompt shoe
-```
-
-### [`sam3_detr_exp/compare_video_original_vs_modular.py`](sam3_detr_exp/compare_video_original_vs_modular.py)
-
-对比原始 `sam3.pt` 和模块化 video pipeline 在同一段视频上的结果。
-
-数据格式要求：
-
-- `--video` 当前走的是单个视频文件路径
-- 默认示例是 `assets/videos/bedroom.mp4`
-- 推荐直接用 `.mp4`
-- `--prompt` 是文本提示词，例如 `person`
-
-```bash
-python sam3_detr_exp/compare_video_original_vs_modular.py \
-  --video assets/videos/bedroom.mp4 \
-  --prompt person \
-  --max-frames 2
-```
-
-### [`sam3_detr_exp/train_detr_lora.py`](sam3_detr_exp/train_detr_lora.py)
-
-基于 `lightning==2.6.5` 的 DETR LoRA 微调入口，当前接的是 `/slow_disk/ccl/data/crack_segment` 的 YOLO segmentation 数据。
-
-最小 dry-run：
-
-```bash
-python sam3_detr_exp/train_detr_lora.py \
-  --dataset-root /slow_disk/ccl/data/crack_segment \
-  --train-split train \
-  --val-split val \
-  --max-train-samples 1 \
-  --max-val-samples 1 \
-  --dry-run
-```
-
-正式训练：
-
-```bash
-python sam3_detr_exp/train_detr_lora.py \
-  --dataset-root /slow_disk/ccl/data/crack_segment \
-  --train-split train \
-  --val-split val \
-  --batch-size 20 \
-  --epochs 20
-```
-
-默认行为：
-
-- 输入是图像加文本提示
-- 监督输出是 `pred_logits`、`pred_boxes`、`pred_masks`
-- 文本提示默认来自 `data.yaml` 的类别名
-- LoRA 权重默认保存到 `sam3_detr_exp/weights_lora/detr_transformer_lora.pt`
-
-训练数据格式要求：
-
-- `--dataset-root` 目录下必须有 `data.yaml`
-- `data.yaml` 里必须有 `names:`，并按 `class_id: class_name` 形式定义类别名
-- 每个 split 目前默认直接放在：
-  - `train/`
-  - `val/`
-- 图片和标签当前是“同目录同名”：
-  - `train/xxx.jpg`
-  - `train/xxx.txt`
-  - `val/yyy.png`
-  - `val/yyy.txt`
-- 标签格式是 YOLO segmentation：
-  - 每一行一个实例
-  - 第 1 列是 `class_id`
-  - 后面是多边形点序列：`x1 y1 x2 y2 ...`
-  - 坐标必须是相对原图的归一化坐标，范围 `[0, 1]`
-  - 一行至少要有 3 个点，也就是至少 `7` 列
-- 当前 dataloader 会把同一张图中“同一类别”的多个 polygon 聚合成一个训练样本
-
-目录示例：
+## 实验关系
 
 ```text
-dataset_root/
-  data.yaml
-  train/
-    0001.jpg
-    0001.txt
-    0002.jpg
-    0002.txt
-  val/
-    0101.jpg
-    0101.txt
+SAM3 Base
+└── sam3_detr_exp：DETR LoRA，作为教师和效果上限
+    ├── sam3_lightweight_stage3_distill_exp：蒸馏到EfficientViT Stage-3
+    └── sam3_lightweight_tinyvit_stage3_distill_exp：蒸馏到TinyViT Stage-3
+
+sam3_lightweight_exp：早期TinyViT-S固定词表实验
+sam3_lightweight_stage3_exp：官方EfficientViT Stage-3直接LoRA基线
 ```
 
-`data.yaml` 示例：
+## 各实验训练基础、进度与量化结论
 
-```yaml
-names:
-  0: linear crack
-  1: alligator crack
-  2: pothole
-```
+“完成轮数”按实际完成验证的epoch计数，不把中途退出的epoch算作完整一轮。“最佳轮次”保留日志中的零基编号。
 
-标签 `0001.txt` 单行示例：
+| 实验及所属目录 | 在什么基础上训练 | 本次训练改动 | 实际轮数与停止情况 | 统一10图结果（阈值0.5） | 实验结论 |
+|---|---|---|---|---|---|
+| [Base + DETR LoRA（`sam3_detr_exp/`）](sam3_detr_exp/README.md) | 原始SAM3 Base模块化权重 | DETR Encoder/Decoder r8 LoRA，并训练点积分类头和分割头 | 日志`lightning_logs/version_18`完成8轮验证（epoch 0～7），epoch 8未完成；最佳验证loss在epoch 4。现有文档未记录提前停止原因 | 白实线IoU 0.7235、Recall 0.7883；白虚线IoU 0.6808、Recall 0.8226；平均IoU 0.7021 | 当前教师和效果上限，但训练停止原因需要补录 |
+| [早期TinyViT-S（`sam3_lightweight_exp/`）](sam3_lightweight_exp/README.md) | `efficient_sam3_tinyvit_s.pt`，文本编码器替换为固定词表 | DETR r8 LoRA，并训练点积分类头和分割头 | 原计划3轮，只完成epoch 0后主动停止，用于先验证可行性；`val/loss=9.3882` | 未计算IoU/Recall；只记录白实线77个、白虚线49个检测及平均置信度0.5956/0.6141 | 只能证明训练链路与领域响应可行，不能与完整实验作效果排名 |
+| [EfficientViT Stage-3 LoRA（`sam3_lightweight_stage3_exp/`）](sam3_lightweight_stage3_exp/README.md) | 官方Stage-3 EV-M：EfficientViT-B1 + MobileCLIP-S0 | 图像与文本编码器冻结；DETR r8 LoRA，并训练点积分类头和分割头 | 完成计划的20轮（epoch 0～19），最佳验证loss为epoch 10的7.1777；没有提前停止 | 白实线IoU 0.3905、Recall 0.5137；白虚线IoU 0.2153、Recall 0.2403；平均IoU 0.3029 | 完整训练后仍明显落后Base，尤其是白虚线召回 |
+| [EfficientViT Stage-3 P0蒸馏（`sam3_lightweight_stage3_distill_exp/`）](sam3_lightweight_stage3_distill_exp/README.md) | 上一行Stage-3最佳LoRA；教师为Base + DETR最佳LoRA | 保留真实监督，增加最终层分类、presence、框和mask KD；学生仍训练r8 LoRA与两个输出头 | 计划10轮；日志`version_5`完成8轮验证（epoch 0～7），epoch 8未完成后主动停止；最低`val/loss=11.1575`在epoch 1 | 目录内未保留可复核的统一10图IoU/Recall结果 | 只能确认蒸馏训练完成过且验证loss未持续改善；没有统一实测数值，不能量化其相对Stage-3 LoRA的收益 |
+| [TinyViT Stage-3 P0（实验根目录）](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 官方TinyViT Stage-3基模；DETR和输出头初始化自Stage-3学生LoRA；教师为Base最佳LoRA | 图像Stage 2/3 r8 LoRA + DETR r8 LoRA + 输出头；增加最终输出KD | 计划10轮，完成7轮（epoch 0～6）后主动停止；最佳点epoch 6，`val/loss=10.0117` | 白实线IoU 0.5187、Recall 0.6676；白虚线IoU 0.3400、Recall 0.4139；平均IoU 0.4293 | 明显超过EfficientViT Stage-3，但仍远低于Base |
+| [TinyViT Stage-3 P1（`p1_image_feature/`）](sam3_lightweight_tinyvit_stage3_distill_exp/p1_image_feature/README.md) | 从P0最佳权重继续训练 | 保留P0全部损失，新增三尺度图像FPN特征KD；图像LoRA仍为Stage 2/3 r8 | 计划10轮，完成7轮（epoch 0～6）后主动停止；最佳点epoch 6，`val/loss=10.2271` | 白实线IoU 0.5343、Recall 0.6863；白虚线IoU 0.3490、Recall 0.4279；平均IoU 0.4417 | 相对P0平均IoU +0.0124，特征蒸馏有效但增益较小 |
+| [TinyViT Stage-3 P2（`p2_image_stage123/`）](sam3_lightweight_tinyvit_stage3_distill_exp/p2_image_stage123/README.md) | 从P1最佳权重继续训练 | 在相同蒸馏配置上，把图像r8 LoRA从Stage 2/3扩展到Stage 1/2/3 | 计划10轮，完成6轮（epoch 0～5）后主动停止；最佳点epoch 5，`val/loss=10.1169` | 白实线IoU 0.5454、Recall 0.7145；白虚线IoU 0.3652、Recall 0.4461；平均IoU 0.4553 | 当前最佳轻量结果；相对P1平均IoU +0.0136，但收益同时混有额外训练轮数，不能完全归因于Stage 1 LoRA |
+| [TinyViT Stage-3 P3（`p3_image_r16/`）](sam3_lightweight_tinyvit_stage3_distill_exp/p3_image_r16/README.md) | 将P2最佳图像r8增量合并进基权重，再挂载零增量图像r16；DETR r8和输出头继承P2 | 只把图像LoRA从r8提高到r16，其他配置不变 | 正式训练尚未开始；仅完成1个训练step和1个验证step的冒烟测试 | 无正式结果；转换一致性单图白实线IoU 0.5373→0.5375、白虚线0.3978→0.4012 | 目前只能证明转换与训练链路正确，不能判断r16是否提升效果 |
 
-```text
-0 0.125 0.210 0.180 0.215 0.240 0.260 0.230 0.320
-```
+统一数值均以相同10张道路图片、相同文本提示和置信度阈值0.5为准。测试集只有白实线与白虚线真值；其他五类只能观察误检，不能评估正样本IoU。各实验的损失项不同，跨实验应优先比较统一实际IoU和Recall，不直接比较`val/loss`绝对值。
 
-## LoRA Effect
+## 当前总体结论
 
-下面这两张图是同一套 detector 推理脚本导出的结果，方便直接看 LoRA 微调前后差异。
+- Base + DETR LoRA仍显著领先，尤其是白虚线召回。
+- TinyViT Stage-3比EfficientViT Stage-3道路标线基线更适合当前蒸馏路线。
+- 最终输出KD、图像特征KD和扩大图像LoRA覆盖范围均有正收益，但目前都只是渐进提升。
+- 当前已完成的最佳轻量方案是TinyViT P2；下一项严格对照是P3图像r16正式训练与统一评测。
 
-### Before LoRA
+## 阅读顺序
 
-![Before LoRA](sam3_detr_exp/outputs/detr_text_prompt.png)
+1. 先看[Base + DETR LoRA](sam3_detr_exp/README.md)，了解教师模型和效果上限。
+2. 再看[EfficientViT Stage-3直接LoRA](sam3_lightweight_stage3_exp/README.md)及其[蒸馏实验](sam3_lightweight_stage3_distill_exp/README.md)。
+3. 最后看当前主线[TinyViT Stage-3 P0～P3](sam3_lightweight_tinyvit_stage3_distill_exp/README.md)。
 
-### After LoRA
+## 环境
 
-![After LoRA](sam3_detr_exp/outputs/detr_text_prompt_lora.png)
-
-这两张图对应的推理命令分别是：
-
-```bash
-python sam3_detr_exp/run_detr_prompt_inference.py \
-  --image assets/images/test_image.jpg \
-  --text "linear crack" \
-  --output sam3_detr_exp/outputs/detr_text_prompt.png
-```
-
-```bash
-python sam3_detr_exp/run_detr_prompt_inference.py \
-  --image assets/images/test_image.jpg \
-  --text "linear crack" \
-  --lora sam3_detr_exp/weights_lora/detr_transformer_lora.pt \
-  --output sam3_detr_exp/outputs/detr_text_prompt_lora.png
-```
-
-## Training Structure
-
-LoRA 训练代码已经从单文件脚本提炼成分层结构：
-
-- [`sam3_detr_exp/model/detr_lora_module.py`](sam3_detr_exp/model/detr_lora_module.py)
-  - LightningModule 封装
-- [`sam3_detr_exp/utils/detr_lora_data.py`](sam3_detr_exp/utils/detr_lora_data.py)
-  - YOLO segmentation dataset 和 datamodule
-- [`sam3_detr_exp/utils/detr_lora_utils.py`](sam3_detr_exp/utils/detr_lora_utils.py)
-  - LoRA 挂载、保存加载、target 构造、loss 和 detector 组装
-
-## More Docs
-
-- 模块拆分总览、10 个模块分别是什么、每个模块的输入输出 shape、完整 detector/tracker 数据流图：
-  [`sam3_detr_exp/docs/modular-weights.md`](sam3_detr_exp/docs/modular-weights.md)
-- DETR LoRA 微调范围、冻结策略、训练入口、保存加载方式、训练数据格式要求：
-  [`sam3_detr_exp/docs/detr-lora-finetune.md`](sam3_detr_exp/docs/detr-lora-finetune.md)
-
-## Recommended Order
-
-如果你想完整复现这条链路，按这个顺序跑最省事：
-
-1. 导出模块权重
-2. 跑 detector-only 推理
-3. 对比原始模型和模块化模型
-4. 训练 DETR LoRA
-5. 用训练前后两张可视化图检查 LoRA 效果
+当前可运行环境以仓库内`.venv`和根目录[requirements.txt](requirements.txt)为准。具体启动命令、数据格式与模型下载方法请进入相应实验目录查看，避免在根目录复制并维护多份实验细节。
