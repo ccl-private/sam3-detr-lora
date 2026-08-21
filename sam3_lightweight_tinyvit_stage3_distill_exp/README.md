@@ -29,7 +29,7 @@ sam3_lightweight_tinyvit_stage3_distill_exp/
 ├── scripts/                          # P0脚本
 ├── p1_image_feature/                 # P1三尺度图像特征蒸馏
 ├── p2_image_stage123/                # P2图像LoRA扩展到stage 1/2/3
-├── p3_image_r16/                     # P3图像LoRA提高到r16
+├── p3_all_r16/                       # P3图像与DETR LoRA统一提高到r16
 ├── tests/                            # 统一评测代码
 │   └── output/                       # 测试结果，不提交Git
 ├── cache/                            # 教师缓存，不提交Git
@@ -164,32 +164,35 @@ P2从P1最佳权重继续训练：
 | P1增益 | 与P1同配置比较 | 白实线IoU +0.0111，白虚线IoU +0.0162，白虚线Recall +0.0182 |
 | 负类误检观察 | 同一测试集中的无真值类别 | 斑马线误检10张，护栏误检0张 |
 
-测试结论：P2是目前已完成实验中效果最好的TinyViT方案，但相对P1只有小幅稳定提升；由于它从P1最佳点续训，结果同时包含新增Stage 1 LoRA与额外训练轮数的影响。
+测试结论：P2在当时是效果最好的TinyViT方案，但相对P1只有小幅稳定提升；由于它从P1最佳点续训，结果同时包含新增Stage 1 LoRA与额外训练轮数的影响。P3完成后平均IoU略高于P2，但差值仅0.0010。
 
-### P3：图像LoRA提高到r16
+### P3：图像与DETR LoRA统一提高到r16
 
-对应目录：`p3_image_r16/`
+对应目录：`p3_all_r16/`
 
-- 转换脚本：`p3_image_r16/scripts/convert_image_lora_rank.sh`
-- 训练脚本：`p3_image_r16/scripts/train_p3_image_r16.sh`
-- 初始化权重：`weights/p3_image_r16_init.pt`
-- 正式输出：`weights/p3_image_r16.best.pt`
-- 日志：`logs/p3_image_r16/`
+- 转换脚本：`p3_all_r16/scripts/convert_all_lora_rank.sh`
+- 训练脚本：`p3_all_r16/scripts/train_p3_all_r16.sh`
+- 初始化权重：`weights/p3_all_r16_init.pt`
+- 正式输出：`weights/p3_all_r16.best.pt`
+- 日志：`logs/p3_all_r16/`
 
-P3先把P2最佳权重中的40个图像r8 LoRA增量合并进TinyViT基础权重，再在stage 1/2/3挂载40个新初始化的r16、alpha32 LoRA。DETR继续保持r8、alpha16，训练头和蒸馏配置不变。P3尚未开始正式训练。
+P3先把P2最佳权重中的图像r8和DETR r8 LoRA增量分别合并进对应基础权重，再在TinyViT stage 1/2/3与DETR Encoder/Decoder统一挂载新初始化的r16、alpha32 LoRA。点积分类头、分割头和蒸馏配置保持不变。全r16方案已完成转换验证、10轮正式训练和统一10图评测。
 
 当前已完成的测试项目与结果：
 
 | 测试项目 | 测试配置 | 结果 |
 |---|---|---|
-| 权重转换完整性 | 合并40个图像r8模块，再挂载40个图像r16模块 | 转换成功，生成`weights/p3_image_r16_init.pt` |
-| 转换前后一致性 | 同一张图片、阈值0.5，比较P2最佳与P3初始化 | 白实线IoU 0.5373→0.5375；白虚线IoU 0.3978→0.4012，差异属于浮点计算与阈值边界波动 |
-| 单步训练冒烟测试 | 1个训练step + 1个验证step | 训练和验证均通过，图像LoRA、DETR LoRA和训练头梯度均非零 |
-| 图像特征KD冒烟测试 | 同一单步测试 | train 0.3591，val 0.3546 |
-| 参数量检查 | 图像r16，DETR仍为r8 | 总参数105,033,914；可训练参数4,980,993 |
-| 正式道路标线评测 | 固定10张图，阈值0.5 | 尚未训练，因此暂无正式结果 |
+| 权重转换完整性 | 合并图像r8与DETR r8，再统一挂载r16 | 合并/挂载图像40个、DETR 84个，生成`weights/p3_all_r16_init.pt` |
+| 转换前后一致性 | 同一张图片、阈值0.5，比较P2最佳与P3初始化 | 白实线IoU 0.5373→0.5334；白虚线0.3978→0.3989，没有能力断裂 |
+| 单步训练冒烟测试 | 1个训练step + 1个验证step | 训练与验证通过，`val/loss=11.1124` |
+| 梯度检查 | 图像r16、DETR r16和两个输出头 | 梯度范数分别为56.81、63.03、76.99 |
+| 参数量检查 | 图像与DETR均为r16 | 总参数105,844,922；可训练参数5,792,001 |
+| 正式训练 | 从P2最佳转换权重继续，共10轮 | 最佳epoch 3，`val/loss=10.0335`，`val/supervised=5.9835` |
+| 白实线分割 | 固定10张图，阈值0.5 | IoU 0.5487，Precision 0.6950，Recall 0.7228 |
+| 白虚线分割 | 固定10张图，阈值0.5 | IoU 0.3639，Precision 0.6659，Recall 0.4452 |
+| 负类误检观察 | 同一测试集中的无真值类别 | 斑马线误检10张，护栏误检1张 |
 
-阶段结论：P3的转换、前向、反向和验证链路均已打通，但只有完成正式训练并执行统一10图评测后，才能判断提高图像LoRA秩是否有效。
+阶段结论：P3相对P2的`val/loss`下降0.0834、`val/supervised`下降0.0679，但平均IoU只提高0.0010。白实线IoU提高0.0033、Recall提高0.0084；白虚线IoU下降0.0013、Recall下降0.0008。提高LoRA秩改善了训练目标，却没有解决白虚线召回，也没有产生有意义的实际效果提升。
 
 ## 统一实际效果对比
 
@@ -201,6 +204,7 @@ P3先把P2最佳权重中的40个图像r8 LoRA增量合并进TinyViT基础权重
 | TinyViT P0 | 本目录根部 | 0.5187 | 0.6676 | 0.3400 | 0.4139 | 0.4293 |
 | TinyViT P1图像特征KD | `p1_image_feature/` | 0.5343 | 0.6863 | 0.3490 | 0.4279 | 0.4417 |
 | TinyViT P2 Stage 1/2/3 | `p2_image_stage123/` | 0.5454 | 0.7145 | 0.3652 | 0.4461 | 0.4553 |
+| TinyViT P3全LoRA r16 | `p3_all_r16/` | 0.5487 | 0.7228 | 0.3639 | 0.4452 | 0.4563 |
 | Base + DETR LoRA | `../sam3_detr_exp/` | 0.7235 | 0.7883 | 0.6808 | 0.8226 | 0.7021 |
 
 P0到P1的实际变化：
@@ -210,27 +214,26 @@ P0到P1的实际变化：
 - 白虚线Recall相对提升约3.4%。
 - 护栏负类误检数从10降到5；斑马线误检仍为10。
 
-总体结论：TinyViT明显优于此前EfficientViT轻量基线，图像特征蒸馏和扩大图像LoRA覆盖范围都带来稳定正收益，但当前最佳P2与Base仍有明显差距，尤其是白虚线Recall。现有结果说明蒸馏方向有效，但当前r8 LoRA容量仍无法复现Base能力。
+总体结论：TinyViT明显优于此前EfficientViT轻量基线，图像特征蒸馏和扩大图像LoRA覆盖范围带来稳定正收益；但P3把全部LoRA提高到r16后几乎没有继续提升，说明限制效果的主要因素已经不是低秩容量。P3与Base仍有明显差距，尤其是白虚线Recall。
 
 ## Loss比较注意事项
 
 - Base的`val/loss`只包含SAM3监督损失。
 - P0的`val/loss = supervised + 最终输出KD`。
-- P1/P2的`val/loss = supervised + 最终输出KD + 图像特征KD`。
+- P1/P2/P3的`val/loss = supervised + 最终输出KD + 图像特征KD`。
 - 不同实验的验证batch size曾经不同，原始损失还存在批量聚合尺度差异。
 - 因此跨实验优先比较`val/supervised`、扣除新增KD后的趋势和统一实际IoU，不直接比较`val/loss`绝对值。
 
 ## 下一步
 
-当前优先路线是提高图像侧LoRA容量，而不是立即解冻整个模型：
+P3已经完成“低秩容量是否为主要瓶颈”的验证，结果是否定的：
 
-1. P2相对P1的白虚线IoU从0.3490提升到0.3652，提升0.0162，未达到0.02。
-2. 停止stage 1 r8继续训练路线，进入P3图像r16实验。
-3. 图像LoRA使用r16、alpha32并覆盖stage 1/2/3；DETR继续保持r8。
-4. 保持现有蒸馏损失不变，先判断低秩容量是否为主要瓶颈。
-5. 如果r16仍无明显提升，再考虑解冻完整TinyViT与neck。
+1. 全r16相对P2平均IoU只提高0.0010，白虚线指标略有下降。
+2. 不建议继续提高到r32，也不建议仅靠延长P3训练期待质变；epoch 3之后验证指标已经进入平台。
+3. 下一步优先考虑解冻TinyViT高层与neck，让视觉表征本身适应道路标线。
+4. 另一个方向是针对白虚线召回调整数据采样、困难样本和任务指标选模，而不是继续优化总loss。
 
-如果r16仍无明显提升，再考虑解冻完整TinyViT与neck。完整微调会增加训练成本，但不会改变轻量模型的部署架构和推理参数规模。
+完整微调会增加训练成本，但不会改变轻量模型的部署架构和推理参数规模。进入下一阶段前，应设计同起点、同轮数的严格对照，避免把续训收益误判为模块解冻收益。
 
 ## 常用命令
 
@@ -258,9 +261,9 @@ P2四卡训练：
 bash sam3_lightweight_tinyvit_stage3_distill_exp/p2_image_stage123/scripts/train_p2_image_stage123.sh
 ```
 
-P3图像r16权重转换与四卡训练：
+P3全LoRA r16权重转换与四卡训练：
 
 ```bash
-bash sam3_lightweight_tinyvit_stage3_distill_exp/p3_image_r16/scripts/convert_image_lora_rank.sh
-bash sam3_lightweight_tinyvit_stage3_distill_exp/p3_image_r16/scripts/train_p3_image_r16.sh
+bash sam3_lightweight_tinyvit_stage3_distill_exp/p3_all_r16/scripts/convert_all_lora_rank.sh
+bash sam3_lightweight_tinyvit_stage3_distill_exp/p3_all_r16/scripts/train_p3_all_r16.sh
 ```

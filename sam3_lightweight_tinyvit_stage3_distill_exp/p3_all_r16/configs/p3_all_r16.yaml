@@ -1,5 +1,5 @@
-experiment: TinyViT-Stage3-P3-Image-R16
-initial_weights: ../../weights/p3_image_r16_init.pt
+experiment: TinyViT-Stage3-P3-All-LoRA-R16
+initial_weights: ../../weights/p3_all_r16_init.pt
 
 image_lora:
   source_rank_merged: 8
@@ -8,8 +8,9 @@ image_lora:
   stages: [1, 2, 3]
 
 detr_lora:
-  rank: 8
-  alpha: 16
+  source_rank_merged: 8
+  rank: 16
+  alpha: 32
 
 distillation:
   keep_p0_final_output_kd: true

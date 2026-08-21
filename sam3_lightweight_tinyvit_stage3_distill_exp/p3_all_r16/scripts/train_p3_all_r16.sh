@@ -9,15 +9,15 @@ PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}" \
   --data-yaml sam3_lightweight_stage3_exp/configs/roadline_lora.yaml \
   --cache-root sam3_lightweight_stage3_distill_exp/cache/p0_teacher \
   --feature-cache-root sam3_lightweight_tinyvit_stage3_distill_exp/cache/p1_image_features \
-  --student-lora sam3_lightweight_tinyvit_stage3_distill_exp/weights/p3_image_r16_init.pt \
+  --student-lora sam3_lightweight_tinyvit_stage3_distill_exp/weights/p3_all_r16_init.pt \
   --checkpoint sam3_lightweight_stage3_exp/input/efficientsam3_tinyvit_stage3.pt \
-  --save sam3_lightweight_tinyvit_stage3_distill_exp/weights/p3_image_r16.pt \
+  --save sam3_lightweight_tinyvit_stage3_distill_exp/weights/p3_all_r16.pt \
   --image-lora-stages 1 2 3 \
   --image-lora-rank 16 \
   --image-lora-alpha 32 \
-  --lora-rank 8 \
-  --lora-alpha 16 \
-  --log-name p3_image_r16 \
+  --lora-rank 16 \
+  --lora-alpha 32 \
+  --log-name p3_all_r16 \
   --epochs 10 \
   --batch-size 4 \
   --num-workers 8 \

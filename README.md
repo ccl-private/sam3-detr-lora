@@ -22,7 +22,7 @@
     ↓
    P2 图像LoRA从Stage 2/3扩展到Stage 1/2/3
     ↓
-   P3 图像LoRA从r8提高到r16（待正式训练）
+   P3 图像与DETR LoRA统一从r8提高到r16（已完成，实际增益不明显）
 ```
 
 下面按真实实验先后说明每一步的独立目标、训练基础、结果，以及它与后续实验的关系。详细命令、代码结构和完整指标放在对应实验目录的README中。
@@ -121,16 +121,18 @@
 - 改动：保持蒸馏损失不变，把图像r8 LoRA从Stage 2/3扩展到Stage 1/2/3。
 - 训练：计划10轮，完成6轮（epoch 0～5）后主动停止；最佳点为epoch 5，验证loss为10.1169。
 - 结果：白实线IoU/Recall为0.5454/0.7145，白虚线为0.3652/0.4461，平均IoU为0.4553。
-- 结论：相对P1平均IoU提高0.0136，是当前最佳轻量结果，但仍没有质的飞跃。由于P2从P1继续训练，收益不能完全归因于新增Stage 1 LoRA。
+- 结论：相对P1平均IoU提高0.0136，是P3之前的最佳轻量结果，但仍没有质的飞跃。由于P2从P1继续训练，收益不能完全归因于新增Stage 1 LoRA。
 
-### 4.4 P3：图像LoRA从r8提高到r16
+### 4.4 P3：图像与DETR LoRA统一提高到r16
 
-- 位置：[p3_image_r16](sam3_lightweight_tinyvit_stage3_distill_exp/p3_image_r16/README.md)
-- 起点：将P2最佳权重中的图像r8增量合并进基础权重，再挂载零增量图像r16；DETR r8和输出头继续继承P2。
-- 改动：只提高图像LoRA秩，蒸馏损失和DETR配置不变。
-- 训练：正式训练尚未开始，只完成1个训练step和1个验证step的冒烟测试。
-- 测试：转换前后单图白实线IoU为0.5373→0.5375，白虚线为0.3978→0.4012，属于数值与阈值边界波动。
-- 结论：目前只能证明权重转换和训练链路正确，不能判断r16是否有效。
+- 位置：[p3_all_r16](sam3_lightweight_tinyvit_stage3_distill_exp/p3_all_r16/README.md)
+- 起点：P2最佳权重。
+- 改动：先把P2图像与DETR的r8增量合并进对应基础权重，再给TinyViT Stage 1/2/3和DETR Encoder/Decoder统一挂载零增量r16、alpha32 LoRA；输出头和蒸馏损失不变。
+- 验证：已合并并重新挂载40个图像LoRA模块和84个DETR LoRA模块；转换前后单图白实线IoU为0.5373→0.5334，白虚线为0.3978→0.3989。单步训练/验证通过，DETR、图像和输出头梯度均非零。
+- 参数量：总参数105,844,922，可训练参数5,792,001。
+- 训练：完整完成10轮（epoch 0～9），最佳点为epoch 3；`val/loss=10.0335`、`val/supervised=5.9835`、图像特征KD为0.3315。epoch 3之后进入波动平台。
+- 结果：白实线IoU/Recall为0.5487/0.7228，白虚线为0.3639/0.4452，平均IoU为0.4563。
+- 结论：相对P2平均IoU只提高0.0010；白实线略升，但白虚线IoU和Recall略降。统一r16能降低训练loss，却没有形成有意义的实际效果提升，说明当前主要瓶颈不是LoRA秩。
 
 ## 统一结果对比
 
@@ -143,6 +145,7 @@
 | TinyViT P0 | [TinyViT实验根目录](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 0.5187 | 0.6676 | 0.3400 | 0.4139 | 0.4293 |
 | TinyViT P1 | [p1_image_feature](sam3_lightweight_tinyvit_stage3_distill_exp/p1_image_feature/README.md) | 0.5343 | 0.6863 | 0.3490 | 0.4279 | 0.4417 |
 | TinyViT P2 | [p2_image_stage123](sam3_lightweight_tinyvit_stage3_distill_exp/p2_image_stage123/README.md) | 0.5454 | 0.7145 | 0.3652 | 0.4461 | 0.4553 |
+| TinyViT P3全r16 | [p3_all_r16](sam3_lightweight_tinyvit_stage3_distill_exp/p3_all_r16/README.md) | 0.5487 | 0.7228 | 0.3639 | 0.4452 | 0.4563 |
 
 早期TinyViT-S和EfficientViT P0蒸馏没有可复核的统一IoU/Recall，因此不放入数值排名。不同阶段的loss组成不同，跨实验应比较上表的实际IoU和Recall，不能直接比较`val/loss`。
 
@@ -161,8 +164,9 @@
 - 项目早期已经成功完成SAM3模块拆分、重组验证和Base DETR LoRA道路标线微调；轻量化实验建立在这一成功结果上。
 - Base + DETR LoRA目前仍是效果上限，轻量模型的主要差距集中在白虚线召回。
 - EfficientViT路线完整训练后效果不足，输出蒸馏也没有形成可量化改善，因此已经转向TinyViT。
-- TinyViT的最终输出KD、图像特征KD和扩大图像LoRA覆盖范围都带来连续小幅提升，但尚未接近Base。
-- 当前已完成的最佳轻量方案是P2；下一步是正式训练P3，并按同一10图口径判断图像r16是否带来超过P2续训噪声的增益。
+- TinyViT的最终输出KD、图像特征KD和扩大图像LoRA覆盖范围带来了连续小幅提升，但尚未接近Base。
+- P3把图像和DETR LoRA统一提高到r16后，平均IoU只比P2增加0.0010，白虚线指标反而略降；继续提高LoRA秩不再是优先路线。
+- 按平均IoU数值P3为0.4563、略高于P2的0.4553，但差异很小，不能视为质变。下一步应考虑解冻TinyViT高层与neck，或针对白虚线召回重新设计数据与损失。
 
 ## 环境与目录约束
 
