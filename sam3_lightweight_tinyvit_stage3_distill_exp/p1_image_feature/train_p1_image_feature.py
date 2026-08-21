@@ -170,6 +170,7 @@ def main() -> None:
     parser.add_argument("--foreground-weight", type=float, default=4.0)
     parser.add_argument("--image-lora-stages", type=int, nargs="+", default=[2, 3])
     parser.add_argument("--log-name", default="p1_image_feature")
+    parser.add_argument("--save-every-epoch", action="store_true")
     parser.set_defaults(
         student_lora=EXP_DIR / "weights/p0_image_lora_r8.best.pt",
         save=EXP_DIR / "weights/p1_image_feature_r8.pt",
@@ -207,13 +208,16 @@ def main() -> None:
     print(f"P1 总参数={sum(parameter.numel() for parameter in model.parameters()):,}")
     print(f"P1 可训练参数={sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad):,}")
     best_path = args.best_save or p0.default_best_path(args.save)
+    callbacks = [p0.SaveBest(best_path)]
+    if args.save_every_epoch:
+        callbacks.append(p0.SaveEveryEpoch(args.save))
     trainer = L.Trainer(
         default_root_dir=EXP_DIR / "logs" / args.log_name,
         accelerator=args.accelerator, devices=args.devices,
         strategy="ddp_find_unused_parameters_true" if args.devices > 1 else "auto",
         max_epochs=1 if args.dry_run else args.epochs,
         precision=args.precision, gradient_clip_val=1.0,
-        callbacks=[p0.SaveBest(best_path)], enable_checkpointing=False,
+        callbacks=callbacks, enable_checkpointing=False,
         enable_model_summary=False, num_sanity_val_steps=0,
         limit_train_batches=1 if args.dry_run else 1.0,
         limit_val_batches=1 if args.dry_run else 1.0,

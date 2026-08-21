@@ -1,0 +1,23 @@
+experiment: TinyViT-Stage3-P4-Unfreeze-Stage3-Neck
+initial_weights: ../../weights/p2_image_stage123_r8.best.pt
+
+image:
+  stage1_lora: {rank: 8, alpha: 16}
+  stage2_lora: {rank: 8, alpha: 16}
+  stage3: {mode: full, lr: 2.0e-6}
+  neck: {mode: full, lr: 1.0e-5}
+
+detr_lora: {rank: 8, alpha: 16, lr: 5.0e-5}
+heads: {mode: full, lr: 2.0e-5}
+
+distillation:
+  keep_p0_final_output_kd: true
+  keep_three_level_image_feature_kd: true
+  image_feature_kd_weight: 1.0
+  foreground_weight: 4.0
+
+training:
+  epochs: 3
+  batch_size_per_gpu: 4
+  devices: 4
+  precision: bf16-mixed

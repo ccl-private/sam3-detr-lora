@@ -133,6 +133,13 @@ class P0DistillModule(L.LightningModule):
         set_frozen_module_modes(self.detector, train_dot_score=True, train_seg_head=True)
         set_image_lora_train(self.detector)
 
+    def _set_trainable_modes(self) -> None:
+        """设置训练态；子实验可扩展需要完整解冻的视觉模块。"""
+        set_frozen_module_modes(
+            self.detector, train_dot_score=True, train_seg_head=True,
+        )
+        set_image_lora_train(self.detector)
+
     def configure_optimizers(self):
         lora_params = []
         image_lora_params = []
@@ -277,8 +284,7 @@ class P0DistillModule(L.LightningModule):
 
     def _shared_step(self, batch, stage: str):
         if stage == "train":
-            set_frozen_module_modes(self.detector, train_dot_score=True, train_seg_head=True)
-            set_image_lora_train(self.detector)
+            self._set_trainable_modes()
         images = torch.stack([sample.image for sample in batch]).to(self.device, non_blocking=True)
         prompt_targets = []
         prompt_img_ids = []
@@ -383,6 +389,23 @@ class SaveBest(L.Callback):
         if trainer.is_global_zero:
             pl_module.save_lora_checkpoint(self.path)
             print(f"已保存 P0 最佳权重：{self.path} val/loss={self.best:.6f}", flush=True)
+
+
+class SaveEveryEpoch(L.Callback):
+    """保存每个完整验证epoch，供训练后按任务IoU而不是loss选模。"""
+
+    def __init__(self, base_path: Path):
+        self.base_path = Path(base_path)
+
+    def on_validation_epoch_end(self, trainer, pl_module) -> None:
+        if trainer.sanity_checking or not trainer.is_global_zero:
+            return
+        suffix = self.base_path.suffix or ".pt"
+        path = self.base_path.with_name(
+            f"{self.base_path.stem}.epoch{trainer.current_epoch}{suffix}"
+        )
+        pl_module.save_lora_checkpoint(path)
+        print(f"已保存epoch权重：{path}", flush=True)
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -30,6 +30,7 @@ sam3_lightweight_tinyvit_stage3_distill_exp/
 ├── p1_image_feature/                 # P1三尺度图像特征蒸馏
 ├── p2_image_stage123/                # P2图像LoRA扩展到stage 1/2/3
 ├── p3_all_r16/                       # P3图像与DETR LoRA统一提高到r16
+├── p4_unfreeze_stage3_neck/          # P4严格对照：完整解冻Stage 3与neck
 ├── tests/                            # 统一评测代码
 │   └── output/                       # 测试结果，不提交Git
 ├── cache/                            # 教师缓存，不提交Git
@@ -205,6 +206,8 @@ P3先把P2最佳权重中的图像r8和DETR r8 LoRA增量分别合并进对应�
 | TinyViT P1图像特征KD | `p1_image_feature/` | 0.5343 | 0.6863 | 0.3490 | 0.4279 | 0.4417 |
 | TinyViT P2 Stage 1/2/3 | `p2_image_stage123/` | 0.5454 | 0.7145 | 0.3652 | 0.4461 | 0.4553 |
 | TinyViT P3全LoRA r16 | `p3_all_r16/` | 0.5487 | 0.7228 | 0.3639 | 0.4452 | 0.4563 |
+| P4 Control最佳（epoch 0） | `p4_unfreeze_stage3_neck/` | 0.5411 | 0.7200 | 0.3680 | 0.4550 | 0.4546 |
+| P4解冻最佳（epoch 1） | `p4_unfreeze_stage3_neck/` | 0.5180 | 0.6801 | 0.3664 | 0.4652 | 0.4422 |
 | Base + DETR LoRA | `../sam3_detr_exp/` | 0.7235 | 0.7883 | 0.6808 | 0.8226 | 0.7021 |
 
 P0到P1的实际变化：
@@ -214,7 +217,7 @@ P0到P1的实际变化：
 - 白虚线Recall相对提升约3.4%。
 - 护栏负类误检数从10降到5；斑马线误检仍为10。
 
-总体结论：TinyViT明显优于此前EfficientViT轻量基线，图像特征蒸馏和扩大图像LoRA覆盖范围带来稳定正收益；但P3把全部LoRA提高到r16后几乎没有继续提升，说明限制效果的主要因素已经不是低秩容量。P3与Base仍有明显差距，尤其是白虚线Recall。
+总体结论：TinyViT明显优于此前EfficientViT轻量基线，图像特征蒸馏和扩大图像LoRA覆盖范围带来稳定正收益；但P3把全部LoRA提高到r16后几乎没有继续提升，P4完整解冻Stage 3与neck后平均IoU反而下降，说明限制效果的主要因素既不是低秩容量，也不能通过直接放开高层视觉参数解决。轻量模型与Base仍有明显差距，尤其是白虚线Recall。
 
 ## Loss比较注意事项
 
@@ -230,10 +233,25 @@ P3已经完成“低秩容量是否为主要瓶颈”的验证，结果是否定
 
 1. 全r16相对P2平均IoU只提高0.0010，白虚线指标略有下降。
 2. 不建议继续提高到r32，也不建议仅靠延长P3训练期待质变；epoch 3之后验证指标已经进入平台。
-3. 下一步优先考虑解冻TinyViT高层与neck，让视觉表征本身适应道路标线。
-4. 另一个方向是针对白虚线召回调整数据采样、困难样本和任务指标选模，而不是继续优化总loss。
+3. P4已经验证直接完整解冻TinyViT Stage 3与neck无效，不再追加训练轮数。
+4. 下一步应针对白虚线召回调整数据采样、困难样本和与任务IoU更一致的损失或选模指标，而不是继续扩大参数更新范围或只优化总loss。
 
 完整微调会增加训练成本，但不会改变轻量模型的部署架构和推理参数规模。进入下一阶段前，应设计同起点、同轮数的严格对照，避免把续训收益误判为模块解冻收益。
+
+### P4：解冻Stage 3与neck严格对照
+
+对应目录：`p4_unfreeze_stage3_neck/`
+
+P4已经完成实现、两组完整3轮训练及逐轮统一评测。Control与Unfreeze都从P2最佳权重开始并保持数据与蒸馏损失一致：
+
+- Control保持P2结构，继续训练Stage 1/2/3图像r8 LoRA、DETR r8 LoRA和两个输出头。
+- Unfreeze合并并移除Stage 3的8个图像LoRA，完整解冻Stage 3与FPN neck；Stage 1/2图像r8 LoRA、DETR r8 LoRA和输出头保持不变。
+- Unfreeze可训练参数为17,164,125，其中Stage 3为4,839,772，neck为7,802,112。
+- 专用保存器会保存完整Stage 3与neck权重，不会只保存LoRA而丢失解冻参数。
+
+判定门槛：Unfreeze相对Control平均IoU至少提高0.01，或白虚线Recall至少提高0.02，且负类误检不能明显增加。
+
+实际结果：Control最佳为epoch 0，平均IoU 0.4546；Unfreeze最佳为epoch 1，平均IoU 0.4422，epoch 2又降至0.4395。Unfreeze相对Control平均IoU下降0.0124，白虚线Recall只提高0.0102，因此未达到门槛。虽然Unfreeze最低验证loss从Control的10.1254降至9.9673，但实际分割指标下降，最终判定P4无效。
 
 ## 常用命令
 

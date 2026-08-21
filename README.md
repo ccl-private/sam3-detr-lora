@@ -23,6 +23,8 @@
    P2 图像LoRA从Stage 2/3扩展到Stage 1/2/3
     ↓
    P3 图像与DETR LoRA统一从r8提高到r16（已完成，实际增益不明显）
+    ↓
+   P4 从P2同一起点对比“继续LoRA训练”与“完整解冻Stage 3 + neck”
 ```
 
 下面按真实实验先后说明每一步的独立目标、训练基础、结果，以及它与后续实验的关系。详细命令、代码结构和完整指标放在对应实验目录的README中。
@@ -134,6 +136,18 @@
 - 结果：白实线IoU/Recall为0.5487/0.7228，白虚线为0.3639/0.4452，平均IoU为0.4563。
 - 结论：相对P2平均IoU只提高0.0010；白实线略升，但白虚线IoU和Recall略降。统一r16能降低训练loss，却没有形成有意义的实际效果提升，说明当前主要瓶颈不是LoRA秩。
 
+### 4.5 P4：完整解冻Stage 3与neck严格对照
+
+- 位置：[p4_unfreeze_stage3_neck](sam3_lightweight_tinyvit_stage3_distill_exp/p4_unfreeze_stage3_neck/README.md)
+- 共同起点：P2最佳权重，不从P3继续，避免引入无明显收益的r16变量。
+- Control：保持P2结构和r8 LoRA，继续训练3轮。
+- Unfreeze：合并并移除Stage 3的8个图像LoRA，完整解冻Stage 3与FPN neck；Stage 1/2图像r8 LoRA、DETR r8 LoRA和输出头保持不变，同样训练3轮。
+- 参数量：Control可训练4,636,929；Unfreeze可训练17,164,125，其中Stage 3为4,839,772，neck为7,802,112。
+- 训练：两组均完整训练3轮（epoch 0～2），并逐轮完成相同10图、7提示、阈值0.5的统一评测。
+- 结果：Control最佳为epoch 0，白实线IoU/Recall为0.5411/0.7200，白虚线为0.3680/0.4550，平均IoU为0.4546；Unfreeze最佳为epoch 1，对应0.5180/0.6801和0.3664/0.4652，平均IoU为0.4422。Unfreeze epoch 2又降至0.4395。
+- 判定门槛：相对Control平均IoU至少提高0.01，或白虚线Recall至少提高0.02，且负类误检不能明显增加。
+- 结论：Unfreeze平均IoU反而下降0.0124，白虚线Recall只提高0.0102，未达到门槛。尽管最低验证loss由10.1254降至9.9673，任务指标没有受益，因此P4判定无效，不继续追加轮数。
+
 ## 统一结果对比
 
 统一结果使用相同10张道路图片、相同文本提示和置信度阈值0.5。测试集只有白实线和白虚线真值，其他类别只能观察误检。
@@ -146,6 +160,8 @@
 | TinyViT P1 | [p1_image_feature](sam3_lightweight_tinyvit_stage3_distill_exp/p1_image_feature/README.md) | 0.5343 | 0.6863 | 0.3490 | 0.4279 | 0.4417 |
 | TinyViT P2 | [p2_image_stage123](sam3_lightweight_tinyvit_stage3_distill_exp/p2_image_stage123/README.md) | 0.5454 | 0.7145 | 0.3652 | 0.4461 | 0.4553 |
 | TinyViT P3全r16 | [p3_all_r16](sam3_lightweight_tinyvit_stage3_distill_exp/p3_all_r16/README.md) | 0.5487 | 0.7228 | 0.3639 | 0.4452 | 0.4563 |
+| P4 Control最佳 | [p4_unfreeze_stage3_neck](sam3_lightweight_tinyvit_stage3_distill_exp/p4_unfreeze_stage3_neck/README.md) | 0.5411 | 0.7200 | 0.3680 | 0.4550 | 0.4546 |
+| P4解冻最佳 | [p4_unfreeze_stage3_neck](sam3_lightweight_tinyvit_stage3_distill_exp/p4_unfreeze_stage3_neck/README.md) | 0.5180 | 0.6801 | 0.3664 | 0.4652 | 0.4422 |
 
 早期TinyViT-S和EfficientViT P0蒸馏没有可复核的统一IoU/Recall，因此不放入数值排名。不同阶段的loss组成不同，跨实验应比较上表的实际IoU和Recall，不能直接比较`val/loss`。
 
@@ -157,7 +173,7 @@
 | [sam3_lightweight_exp](sam3_lightweight_exp/README.md) | 第1步：早期轻量化可行性验证 |
 | [sam3_lightweight_stage3_exp](sam3_lightweight_stage3_exp/README.md) | 第2步：EfficientViT Stage-3直接LoRA基线 |
 | [sam3_lightweight_stage3_distill_exp](sam3_lightweight_stage3_distill_exp/README.md) | 第3步：EfficientViT最终输出蒸馏 |
-| [sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 第4步：TinyViT P0～P3连续蒸馏主线 |
+| [sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 第4步：TinyViT P0～P4连续蒸馏与解冻验证主线 |
 
 ## 当前结论与下一步
 
@@ -166,7 +182,9 @@
 - EfficientViT路线完整训练后效果不足，输出蒸馏也没有形成可量化改善，因此已经转向TinyViT。
 - TinyViT的最终输出KD、图像特征KD和扩大图像LoRA覆盖范围带来了连续小幅提升，但尚未接近Base。
 - P3把图像和DETR LoRA统一提高到r16后，平均IoU只比P2增加0.0010，白虚线指标反而略降；继续提高LoRA秩不再是优先路线。
-- 按平均IoU数值P3为0.4563、略高于P2的0.4553，但差异很小，不能视为质变。下一步应考虑解冻TinyViT高层与neck，或针对白虚线召回重新设计数据与损失。
+- 按平均IoU数值P3为0.4563、略高于P2的0.4553，但差异很小，不能视为质变。
+- P4严格对照已经完成：完整解冻Stage 3与neck后最佳平均IoU为0.4422，低于同起点Control的0.4546。验证loss虽下降，实际任务指标反而变差，因此该方向判定无效。
+- 当前不建议继续提高LoRA秩、延长P4训练或扩大解冻范围；下一步应围绕白虚线困难样本、数据采样以及与最终IoU更一致的损失和选模方式设计实验。
 
 ## 环境与目录约束
 
