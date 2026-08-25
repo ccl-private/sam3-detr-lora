@@ -1,0 +1,40 @@
+experiment: TinyViT-P6-Stage1-Frozen-P5
+initial_weights: ../../weights/p5a_dsconv_frozen_20ep.epoch15.pt
+
+branches:
+  stage2:
+    source: p5_epoch15
+    branch_channels: 128
+    frozen: true
+  stage1:
+    input_position: before_stage1_downsample
+    branch_channels: 64
+    kernel_size: 9
+    offset_scale: 1.0
+    directions: [horizontal, vertical]
+    fusion_gate_init: 0.0
+    trainable: true
+
+frozen:
+  tinyvit_base: true
+  image_lora_stages: [1, 2, 3]
+  fpn_neck: true
+  detr_base: true
+  detr_lora: true
+  output_heads: true
+  p5_stage2_branch: true
+
+distillation:
+  keep_final_output_kd: true
+  keep_three_level_image_feature_kd: true
+  image_feature_kd_weight: 1.0
+  foreground_weight: 4.0
+
+training:
+  epochs: 10
+  batch_size_per_gpu: 2
+  devices: 4
+  stage1_branch_lr: 1.0e-4
+  stage1_gate_lr: 1.0e-3
+  precision: bf16-mixed
+  save_every_epoch: true

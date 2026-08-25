@@ -173,7 +173,7 @@
 | [sam3_lightweight_exp](sam3_lightweight_exp/README.md) | 第1步：早期轻量化可行性验证 |
 | [sam3_lightweight_stage3_exp](sam3_lightweight_stage3_exp/README.md) | 第2步：EfficientViT Stage-3直接LoRA基线 |
 | [sam3_lightweight_stage3_distill_exp](sam3_lightweight_stage3_distill_exp/README.md) | 第3步：EfficientViT最终输出蒸馏 |
-| [sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 第4步：TinyViT P0～P4连续蒸馏与解冻验证主线 |
+| [sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 第4步：TinyViT P0～P7连续蒸馏、DSConv与多尺度融合主线 |
 
 ## 当前结论与下一步
 
@@ -184,7 +184,9 @@
 - P3把图像和DETR LoRA统一提高到r16后，平均IoU只比P2增加0.0010，白虚线指标反而略降；继续提高LoRA秩不再是优先路线。
 - 按平均IoU数值P3为0.4563、略高于P2的0.4553，但差异很小，不能视为质变。
 - P4严格对照已经完成：完整解冻Stage 3与neck后最佳平均IoU为0.4422，低于同起点Control的0.4546。验证loss虽下降，实际任务指标反而变差，因此该方向判定无效。
-- 当前不建议继续提高LoRA秩、延长P4训练或扩大解冻范围；下一步应围绕白虚线困难样本、数据采样以及与最终IoU更一致的损失和选模方式设计实验。
+- 当前不建议继续提高LoRA秩、延长P4训练或扩大解冻范围。
+- P5在冻结P2的条件下增加Stage 2 DSConv分支，20轮最佳平均IoU达到0.5357；P6再冻结P5并增加Stage 1 DSConv，最佳达到0.5912；P7把既有方向特征直连高/中分辨率FPN，最佳达到0.6003。对应说明分别见[P5](sam3_lightweight_tinyvit_stage3_distill_exp/p5_dsconv_thin_line/README.md)、[P6](sam3_lightweight_tinyvit_stage3_distill_exp/p6_multiscale_dsconv/README.md)和[P7](sam3_lightweight_tinyvit_stage3_distill_exp/p7_highres_fpn/README.md)。
+- P7最终主要采用Stage 2到`144×144`的中分辨率直连，Stage 1到`288×288`的简单投影门控接近0；下一步计划从输入侧504分辨率先提取细线再下采样。普通长条卷积严格对照尚未完成，因此目前只能确认高分辨率细线旁路有效，不能确认动态蛇形采样具有独立收益。
 
 ## 环境与目录约束
 

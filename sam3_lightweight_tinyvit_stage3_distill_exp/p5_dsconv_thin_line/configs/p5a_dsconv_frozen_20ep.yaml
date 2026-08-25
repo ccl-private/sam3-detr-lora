@@ -1,0 +1,35 @@
+experiment: TinyViT-P5A-DSConv-Frozen-P2-20Epochs
+initial_weights: ../../weights/p2_image_stage123_r8.best.pt
+
+branch:
+  input_stage: 2
+  input_position: before_stage2_downsample
+  branch_channels: 128
+  kernel_size: 9
+  offset_scale: 1.0
+  directions: [horizontal, vertical]
+  fusion_gate_init: 0.0
+
+frozen:
+  tinyvit_base: true
+  image_lora_stages: [1, 2, 3]
+  fpn_neck: true
+  detr_base: true
+  detr_lora: true
+  dot_score_head: true
+  segmentation_head: true
+
+distillation:
+  keep_p0_final_output_kd: true
+  keep_three_level_image_feature_kd: true
+  image_feature_kd_weight: 1.0
+  foreground_weight: 4.0
+
+training:
+  epochs: 20
+  batch_size_per_gpu: 4
+  devices: 4
+  branch_lr: 1.0e-4
+  gate_lr: 1.0e-3
+  precision: bf16-mixed
+  save_every_epoch: true

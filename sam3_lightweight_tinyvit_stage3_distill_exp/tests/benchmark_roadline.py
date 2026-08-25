@@ -22,12 +22,14 @@ STAGE3_DIR = PROJECT_ROOT / "sam3_lightweight_stage3_exp"
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(STAGE3_DIR))
 sys.path.insert(0, str(EXP_DIR))
+sys.path.insert(0, str(EXP_DIR / "p5_dsconv_thin_line"))
 
 from bootstrap import activate_efficientsam3
 
 activate_efficientsam3()
 
 from sam3.model.sam3_image_processor import Sam3Processor
+from dsconv_branch import P5_BRANCH_PREFIX, attach_p5_dsconv_branch
 from model_adapter import DEFAULT_STAGE3_CHECKPOINT, build_trainable_stage3_detector
 
 PROMPTS = {
@@ -119,8 +121,39 @@ def main() -> None:
         image_lora_alpha=float(meta["image_lora_alpha"]), image_lora_dropout=float(meta["image_lora_dropout"]),
         image_lora_stages=tuple(meta["image_lora_stages"]),
     )
+    model_label = "tinyvit_p0_image_lora"
+    if bool(meta.get("p7_highres_fpn", False)):
+        p7_dir = EXP_DIR / "p7_highres_fpn"
+        p6_dir = EXP_DIR / "p6_multiscale_dsconv"
+        for path in (p7_dir, p6_dir):
+            if str(path) not in sys.path:
+                sys.path.insert(0, str(path))
+        from highres_fpn import attach_p7_from_checkpoint
+
+        attach_p7_from_checkpoint(model, args.weights)
+        model_label = "tinyvit_p7_highres_fpn"
+    elif bool(meta.get("p6_multiscale_dsconv", False)):
+        p6_dir = EXP_DIR / "p6_multiscale_dsconv"
+        if str(p6_dir) not in sys.path:
+            sys.path.insert(0, str(p6_dir))
+        from multiscale_dsconv import attach_multiscale_from_checkpoint
+
+        attach_multiscale_from_checkpoint(model, args.weights)
+        model_label = "tinyvit_p6_multiscale_dsconv"
+    elif int(meta.get("p5_stage", -1)) == 2:
+        attach_p5_dsconv_branch(
+            model,
+            branch_channels=int(meta.get("p5_branch_channels", 128)),
+            kernel_size=int(meta.get("p5_dsconv_kernel_size", 9)),
+            offset_scale=float(meta.get("p5_offset_scale", 1.0)),
+        )
+        model_label = "tinyvit_p5a_dsconv"
     missing, unexpected = model.load_state_dict(payload["state_dict"], strict=False)
-    trained_prefixes = ("dot_prod_scoring.", "segmentation_head.")
+    trained_prefixes = (
+        "dot_prod_scoring.", "segmentation_head.", P5_BRANCH_PREFIX,
+        "p6_stage1_thin_line_branch.",
+        "p7_highres_fpn_adapters.",
+    )
     missing = [key for key in missing if "parametrizations" in key or key.startswith(trained_prefixes)]
     unexpected = [key for key in unexpected if "parametrizations" in key or key.startswith(trained_prefixes)]
     if missing or unexpected:
@@ -146,7 +179,7 @@ def main() -> None:
                 intersection, union = int(np.count_nonzero(pred & gt)), int(np.count_nonzero(pred | gt))
                 pred_pixels, gt_pixels = int(np.count_nonzero(pred)), int(np.count_nonzero(gt))
                 scores = result["scores"].detach().float().cpu()
-                row = {"model": "tinyvit_p0_image_lora", "image": path.name, "prompt": prompt,
+                row = {"model": model_label, "image": path.name, "prompt": prompt,
                        "threshold": args.threshold, "detections": len(scores),
                        "mean_score": float(scores.mean()) if len(scores) else 0.0,
                        "max_score": float(scores.max()) if len(scores) else 0.0,
@@ -159,7 +192,7 @@ def main() -> None:
                 for suffix, value in (("intersection", intersection), ("union", union), ("pred", pred_pixels),
                                       ("gt", gt_pixels), ("detections", len(scores))):
                     aggregate[f"{prompt}|{suffix}"] += value
-                out = args.output / "visualizations" / "tinyvit_p0_image_lora" / prompt.replace(" ", "_")
+                out = args.output / "visualizations" / model_label / prompt.replace(" ", "_")
                 out.mkdir(parents=True, exist_ok=True)
                 render(image, gt, pred).save(out / f"{path.stem}.jpg", quality=90)
                 print(f"{path.name} | {prompt} | 检测={len(scores)} IoU={row['iou']:.4f}", flush=True)
@@ -176,7 +209,7 @@ def main() -> None:
     report = {"images": [str(p) for p in paths], "threshold": args.threshold,
               "weights": str(args.weights), "attached_lora_modules": len(attached),
               "visualization_legend": {"green": "正确", "red": "误检", "blue": "漏检"},
-              "models": {"tinyvit_p0_image_lora": {"parameters": sum(p.numel() for p in model.parameters()),
+              "models": {model_label: {"parameters": sum(p.numel() for p in model.parameters()),
                   "mean_elapsed_ms_excluding_warmup": float(np.mean(elapsed)),
                   "peak_cuda_memory_mib": torch.cuda.max_memory_allocated() / 2**20, "prompts": prompts},
                   "base_detr_lora": {"prompts": base["prompts"], "source_summary": str(args.base_summary)}}}

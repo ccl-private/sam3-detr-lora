@@ -1,0 +1,25 @@
+experiment: TinyViT-P7-HighResolution-FPN-Frozen-P6
+initial_weights: ../../weights/p6_stage1_frozen_p5.epoch8.pt
+
+fusion:
+  reuse_frozen_p6_direction_features: true
+  stage1_target: {fpn_index: 0, shape: [256, 288, 288]}
+  stage2_target: {fpn_index: 1, shape: [256, 144, 144]}
+  keep_p6_low_resolution_residuals: true
+  independent_zero_gates: true
+
+frozen:
+  tinyvit_and_image_lora: true
+  detr_and_heads: true
+  fpn_neck: true
+  p5_stage2_dsconv: true
+  p6_stage1_dsconv: true
+
+training:
+  epochs: 10
+  batch_size_per_gpu: 2
+  devices: 4
+  adapter_lr: 1.0e-4
+  gate_lr: 1.0e-3
+  precision: bf16-mixed
+  save_every_epoch: true
