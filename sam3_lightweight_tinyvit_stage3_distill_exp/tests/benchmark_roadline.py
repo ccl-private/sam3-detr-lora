@@ -96,6 +96,7 @@ def render(image: Image.Image, gt: np.ndarray, pred: np.ndarray) -> Image.Image:
 
 
 def main() -> None:
+    global PROMPTS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--images", type=Path, required=True)
     parser.add_argument("--weights", type=Path, required=True)
@@ -104,8 +105,12 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--prompt", help="只测试一个任意文本提示；该提示没有道路标线真值")
     parser.add_argument("--device", default="cuda:0")
     args = parser.parse_args()
+
+    if args.prompt:
+        PROMPTS = {-1: args.prompt}
 
     paths = sorted(p for p in args.images.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png"})[:args.limit]
     if not paths:

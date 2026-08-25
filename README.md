@@ -218,6 +218,45 @@
 
 早期TinyViT-S和EfficientViT P0蒸馏没有可复核的统一IoU/Recall，因此不放入数值排名。不同阶段的loss组成不同，跨实验应比较上表的实际IoU和Recall，不能直接比较`val/loss`。
 
+## 泛化能力专项检查
+
+### 跨类别开放词汇泛化：当前正式模型已经明显丢失
+
+在固定道路图`DJI_20251231162942_0002_V_frame_001.png`上使用文本提示`car`、阈值0.5进行同图检查。画面中存在大量清晰车辆：
+
+| 模型或权重 | `car`检测数 | 说明 |
+|---|---:|---|
+| 官方EfficientViT Stage-3 | 11 | 微调前通用能力正常 |
+| 官方TinyViT Stage-3 | 10 | 微调前通用能力正常 |
+| Base早期`detr_lora.pt` | 11 | 早期微调仍保留开放类别能力 |
+| Base早期`roadline_sam3_loss_lora.best.pt` | 20 | 早期SAM3-loss版本仍能检测车辆 |
+| 当前正式Base教师`roadline_r8_a16_lr2e4.best.pt` | 0 | 正式多提示道路标线训练后已丢失`car` |
+| EfficientViT道路标线最佳权重 | 0 | TinyViT P0继承它的DETR LoRA与输出头时，能力已经丢失 |
+| TinyViT P2 / P7 / P8 | 0 / 0 / 0 | P2在阈值降到0.1后仍为0，P5～P8不是首次发生退化的位置 |
+
+因此，当前证据支持“正式道路标线专项训练链路造成跨类别泛化丢失”，不能简单归因于TinyViT结构或P8输入细线分支。最可能的共同原因是后期多提示训练中大量空目标、SAM3 Presence损失、完整更新点积分类头，以及只在道路标线提示上继续训练和蒸馏。TinyViT P0又直接继承了已经专项化的EfficientViT学生输出体系，而正式Base教师本身也无法检测`car`，后续阶段没有任何通用类别正样本或保持蒸馏来恢复该能力。
+
+### 同类别跨形态泛化：道路标线能力成功保留
+
+使用3张未参与训练的网络图片检查城市多车道、乡村弯道和低分辨率斜视场景。测试权重为P8 epoch 4，提示为`white solid lane line`和`white dashed lane line`，阈值0.5。图片没有人工标注，因此这里只报告检测数量并人工检查mask，不计算IoU。
+
+| 场景 | 白实线检测数 | 白虚线检测数 | 人工检查结论 |
+|---|---:|---:|---|
+| 城市多车道、远距离、箭头干扰 | 2 | 21 | 远处小虚线和连续边线能够检出；部分方向箭头被虚线提示误检 |
+| 低分辨率斜视道路 | 4 | 9 | 斜向实线、短虚线和左侧块状虚线均能检出 |
+| 乡村弯道 | 4 | 11 | 连续边线能跟随弯曲形态，中心虚线保持分段 |
+| 合计 | 10 | 41 | 城市/乡村、直线/曲线、远景/近景和低分辨率形态均有响应 |
+
+P7和P8在这3张图上的逐图检测数及平均/最高置信度完全一致，都是实线10个、虚线41个；P8主要轻微调整分割mask边界，没有破坏P7的同类别跨形态检出能力。正式Base对应实线12个、虚线52个，候选更多，但没有真值时不能把更多候选直接解释为更高精度。
+
+图示中的红色表示“没有真值可匹配的预测覆盖区域”，不表示这些mask经过人工确认都是误检。原图来源分别为[阿里图片](https://i00.c.aliimg.com/img/ibank/2014/993/659/1557956399_406316771.jpg)、[CSDN图片](https://img-blog.csdnimg.cn/576b4ff07bd748b8b535863b6a158118.png)和[Bing图片](https://tse1.mm.bing.net/th/id/OIP.W_4BdBKB8Fm6GwCekV6z9AHaE7)。仓库内文件统一保存在[跨形态泛化图示目录](assets/experiments/roadline_cross_shape_generalization/)。
+
+| 场景 | 网络来源图 | P8白实线结果 | P8白虚线结果 |
+|---|---|---|---|
+| 城市多车道 | ![城市多车道来源图](assets/experiments/roadline_cross_shape_generalization/source_city_multilane.jpg) | ![城市多车道白实线](assets/experiments/roadline_cross_shape_generalization/p8_city_white_solid.jpg) | ![城市多车道白虚线](assets/experiments/roadline_cross_shape_generalization/p8_city_white_dashed.jpg) |
+| 低分辨率斜视 | ![低分辨率斜视来源图](assets/experiments/roadline_cross_shape_generalization/source_oblique_lowres.webp) | ![低分辨率斜视白实线](assets/experiments/roadline_cross_shape_generalization/p8_oblique_white_solid.jpg) | ![低分辨率斜视白虚线](assets/experiments/roadline_cross_shape_generalization/p8_oblique_white_dashed.jpg) |
+| 乡村弯道 | ![乡村弯道来源图](assets/experiments/roadline_cross_shape_generalization/source_rural_curve.png) | ![乡村弯道白实线](assets/experiments/roadline_cross_shape_generalization/p8_rural_white_solid.jpg) | ![乡村弯道白虚线](assets/experiments/roadline_cross_shape_generalization/p8_rural_white_dashed.jpg) |
+
 ## 五个实验目录的职责
 
 | 目录 | 在路线中的位置 |
@@ -241,6 +280,7 @@
 - P5在冻结P2的条件下增加Stage 2 DSConv分支，平均IoU达到0.5357；P6冻结P5并增加Stage 1 DSConv，达到0.5912；P7冻结P6并把方向特征直连高/中分辨率FPN，达到0.6003。这条结构改造路线的收益明显大于提高LoRA秩或完整解冻。
 - P8进一步从输入侧504分辨率先提取细线再下采样，第1轮平均IoU已达到0.6155，比P7提高0.0152；训练尚未结束，该值只作为阶段结果，不作为最终最佳值。
 - P7最终主要采用Stage 2到`144×144`的中分辨率直连，而P8第1轮又证明输入侧高分辨率特征具有价值。普通长条卷积严格对照尚未完成，因此目前只能确认高分辨率细线旁路有效，不能确认动态蛇形采样具有独立收益。
+- 泛化检查必须区分两个维度：当前正式Base教师和轻量化P0～P8都已明显丢失`car`跨类别开放词汇能力；但P8对3张网络域外道路图仍成功保留了道路标线类别内部的跨拍摄角度、分辨率、曲率和场景形态泛化。
 
 ## 环境与目录约束
 
