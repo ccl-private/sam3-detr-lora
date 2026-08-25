@@ -25,6 +25,14 @@
    P3 图像与DETR LoRA统一从r8提高到r16（已完成，实际增益不明显）
     ↓
    P4 从P2同一起点对比“继续LoRA训练”与“完整解冻Stage 3 + neck”
+    ↓ 解冻无效，回到P2并改造细线视觉结构
+   P5 冻结P2，增加Stage 2 DSConv细线分支
+    ↓
+   P6 冻结P5，增加Stage 1 DSConv细线分支
+    ↓
+   P7 冻结P6，把方向特征直连288/144分辨率FPN
+    ↓
+   P8 冻结P7，从1008原图经无损PixelUnshuffle后提取504分辨率细线特征（训练中）
 ```
 
 下面按真实实验先后说明每一步的独立目标、训练基础、结果，以及它与后续实验的关系。详细命令、代码结构和完整指标放在对应实验目录的README中。
@@ -88,7 +96,7 @@
 
 总目录：[sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md)
 
-这一阶段不是四个独立实验，而是连续续训关系：
+这一阶段包含两段有明确分叉点的连续实验。P0～P3逐步扩大蒸馏和LoRA；P4从P2做严格解冻对照。P4无效后，P5同样回到P2，转而验证细线专用视觉结构；P6～P8再从各自上一阶段实际IoU最佳权重继续：
 
 ```text
 官方TinyViT Stage-3 + 兼容的Stage-3 DETR/输出头
@@ -96,6 +104,11 @@
   → P1从P0最佳继续
   → P2从P1最佳继续
   → P3从P2最佳转换并继续
+  ├→ P4从P2最佳做Control/完整解冻对照（无效，停止）
+  └→ P5从P2最佳增加Stage 2 DSConv
+       → P6从P5任务最佳增加Stage 1 DSConv
+       → P7从P6任务最佳直连高/中分辨率FPN
+       → P8从P7任务最佳增加输入侧504分辨率细线分支（训练中）
 ```
 
 ### 4.1 P0：最终输出KD与图像LoRA
@@ -148,6 +161,42 @@
 - 判定门槛：相对Control平均IoU至少提高0.01，或白虚线Recall至少提高0.02，且负类误检不能明显增加。
 - 结论：Unfreeze平均IoU反而下降0.0124，白虚线Recall只提高0.0102，未达到门槛。尽管最低验证loss由10.1254降至9.9673，任务指标没有受益，因此P4判定无效，不继续追加轮数。
 
+### 4.6 P5：Stage 2 DSConv细线分支
+
+- 位置：[p5_dsconv_thin_line](sam3_lightweight_tinyvit_stage3_distill_exp/p5_dsconv_thin_line/README.md)
+- 起点：P2最佳权重，不从P3或P4继续；保留并冻结P2全部LoRA和旧参数。
+- 改动：只训练新增Stage 2水平/垂直DSConv、偏移预测、融合投影和残差门控，共新增896,019个可训练参数。
+- 训练：完整完成20轮（epoch 0～19），最低验证loss与最佳任务指标都在epoch 15；`val/loss=9.5198`、`val/supervised=5.5815`。
+- 结果：白实线IoU/Recall为0.5746/0.7308，白虚线IoU/Recall为0.4967/0.5957，平均IoU为0.5357，比P2提高0.0804。
+- 结论：冻结P2后，高分辨率细线旁路带来显著增益，尤其改善白虚线；但P5-B普通长条卷积对照尚未执行，因此不能把全部收益严格归因于动态蛇形偏移。
+
+### 4.7 P6：增加Stage 1 DSConv分支
+
+- 位置：[p6_multiscale_dsconv](sam3_lightweight_tinyvit_stage3_distill_exp/p6_multiscale_dsconv/README.md)
+- 起点：P5 epoch 15任务最佳权重；冻结P5和此前全部参数。
+- 改动：新增Stage 1水平/垂直DSConv细线分支，只训练新增301,587个参数。
+- 训练：完整完成10轮（epoch 0～9）；任务指标最佳为epoch 8，最低验证loss在epoch 9。epoch 8的`val/loss=9.3122`、`val/supervised=5.4088`。
+- 结果：白实线IoU/Recall为0.6214/0.7486，白虚线IoU/Recall为0.5610/0.6524，平均IoU为0.5912，比P5提高0.0555。
+- 结论：更早、更高分辨率的Stage 1方向特征具有明确增量；epoch 8～9已经进入平台，因此没有追加到20轮。
+
+### 4.8 P7：方向特征直连高/中分辨率FPN
+
+- 位置：[p7_highres_fpn](sam3_lightweight_tinyvit_stage3_distill_exp/p7_highres_fpn/README.md)
+- 起点：P6 epoch 8任务最佳权重；冻结P6和此前全部参数。
+- 改动：复用P6方向特征，新增到`288×288`与`144×144` FPN的直接适配器和标量门控，只训练99,330个新参数。
+- 训练：完整完成10轮（epoch 0～9），任务指标最佳为epoch 9；`val/loss=9.2771`、`val/supervised=5.3814`。
+- 结果：白实线IoU/Recall为0.6319/0.7603，白虚线IoU/Recall为0.5687/0.6604，平均IoU为0.6003，比P6提高0.0091。
+- 结论：有稳定小幅收益，但未达到预设0.6112门槛。最终高分辨率门控`gate_high=-0.0171`、中分辨率门控`gate_mid=0.7620`，说明模型主要采用Stage 2到`144×144`的直连，而不是对已编码Stage 1特征插值到`288×288`。
+
+### 4.9 P8：输入侧504分辨率细线分支（训练中）
+
+- 位置：[p8_input_line_branch](sam3_lightweight_tinyvit_stage3_distill_exp/p8_input_line_branch/README.md)
+- 起点：P7 epoch 9任务最佳权重；冻结P7和此前全部参数。
+- 改动：将`1008×1008` RGB输入通过`PixelUnshuffle(2)`无损重排为`12×504×504`，先用水平/垂直DSConv提取原图侧细线特征，再融合到`288×288` FPN；只训练83,827个新参数。
+- 当前训练：计划5轮；目前只完成epoch 0。第1轮`val/loss=9.1876`、`val/supervised=5.3093`。
+- 第1轮阶段结果：白实线IoU/Recall为0.6511/0.7758，白虚线IoU/Recall为0.5800/0.6737，平均IoU为0.6155，比P7提高0.0152，已经超过P8预设0.610验收线。
+- 阶段结论：输入侧真正的504分辨率细线提取目前同时改善loss与实际IoU，方向有效；但这不是最终最佳结果，必须等5轮结束后再确定正式权重。DSConv与普通长条卷积的严格对照仍未完成。
+
 ## 统一结果对比
 
 统一结果使用相同10张道路图片、相同文本提示和置信度阈值0.5。测试集只有白实线和白虚线真值，其他类别只能观察误检。
@@ -162,6 +211,10 @@
 | TinyViT P3全r16 | [p3_all_r16](sam3_lightweight_tinyvit_stage3_distill_exp/p3_all_r16/README.md) | 0.5487 | 0.7228 | 0.3639 | 0.4452 | 0.4563 |
 | P4 Control最佳 | [p4_unfreeze_stage3_neck](sam3_lightweight_tinyvit_stage3_distill_exp/p4_unfreeze_stage3_neck/README.md) | 0.5411 | 0.7200 | 0.3680 | 0.4550 | 0.4546 |
 | P4解冻最佳 | [p4_unfreeze_stage3_neck](sam3_lightweight_tinyvit_stage3_distill_exp/p4_unfreeze_stage3_neck/README.md) | 0.5180 | 0.6801 | 0.3664 | 0.4652 | 0.4422 |
+| TinyViT P5（epoch 15） | [p5_dsconv_thin_line](sam3_lightweight_tinyvit_stage3_distill_exp/p5_dsconv_thin_line/README.md) | 0.5746 | 0.7308 | 0.4967 | 0.5957 | 0.5357 |
+| TinyViT P6（epoch 8） | [p6_multiscale_dsconv](sam3_lightweight_tinyvit_stage3_distill_exp/p6_multiscale_dsconv/README.md) | 0.6214 | 0.7486 | 0.5610 | 0.6524 | 0.5912 |
+| TinyViT P7（epoch 9） | [p7_highres_fpn](sam3_lightweight_tinyvit_stage3_distill_exp/p7_highres_fpn/README.md) | 0.6319 | 0.7603 | 0.5687 | 0.6604 | 0.6003 |
+| TinyViT P8（epoch 0，阶段结果） | [p8_input_line_branch](sam3_lightweight_tinyvit_stage3_distill_exp/p8_input_line_branch/README.md) | 0.6511 | 0.7758 | 0.5800 | 0.6737 | 0.6155 |
 
 早期TinyViT-S和EfficientViT P0蒸馏没有可复核的统一IoU/Recall，因此不放入数值排名。不同阶段的loss组成不同，跨实验应比较上表的实际IoU和Recall，不能直接比较`val/loss`。
 
@@ -173,7 +226,7 @@
 | [sam3_lightweight_exp](sam3_lightweight_exp/README.md) | 第1步：早期轻量化可行性验证 |
 | [sam3_lightweight_stage3_exp](sam3_lightweight_stage3_exp/README.md) | 第2步：EfficientViT Stage-3直接LoRA基线 |
 | [sam3_lightweight_stage3_distill_exp](sam3_lightweight_stage3_distill_exp/README.md) | 第3步：EfficientViT最终输出蒸馏 |
-| [sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 第4步：TinyViT P0～P7连续蒸馏、DSConv与多尺度融合主线 |
+| [sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 第4步：TinyViT P0～P8连续蒸馏、DSConv、多尺度融合与输入侧细线分支主线 |
 
 ## 当前结论与下一步
 
@@ -185,8 +238,9 @@
 - 按平均IoU数值P3为0.4563、略高于P2的0.4553，但差异很小，不能视为质变。
 - P4严格对照已经完成：完整解冻Stage 3与neck后最佳平均IoU为0.4422，低于同起点Control的0.4546。验证loss虽下降，实际任务指标反而变差，因此该方向判定无效。
 - 当前不建议继续提高LoRA秩、延长P4训练或扩大解冻范围。
-- P5在冻结P2的条件下增加Stage 2 DSConv分支，20轮最佳平均IoU达到0.5357；P6再冻结P5并增加Stage 1 DSConv，最佳达到0.5912；P7把既有方向特征直连高/中分辨率FPN，最佳达到0.6003。对应说明分别见[P5](sam3_lightweight_tinyvit_stage3_distill_exp/p5_dsconv_thin_line/README.md)、[P6](sam3_lightweight_tinyvit_stage3_distill_exp/p6_multiscale_dsconv/README.md)和[P7](sam3_lightweight_tinyvit_stage3_distill_exp/p7_highres_fpn/README.md)。
-- P7最终主要采用Stage 2到`144×144`的中分辨率直连，Stage 1到`288×288`的简单投影门控接近0；下一步计划从输入侧504分辨率先提取细线再下采样。普通长条卷积严格对照尚未完成，因此目前只能确认高分辨率细线旁路有效，不能确认动态蛇形采样具有独立收益。
+- P5在冻结P2的条件下增加Stage 2 DSConv分支，平均IoU达到0.5357；P6冻结P5并增加Stage 1 DSConv，达到0.5912；P7冻结P6并把方向特征直连高/中分辨率FPN，达到0.6003。这条结构改造路线的收益明显大于提高LoRA秩或完整解冻。
+- P8进一步从输入侧504分辨率先提取细线再下采样，第1轮平均IoU已达到0.6155，比P7提高0.0152；训练尚未结束，该值只作为阶段结果，不作为最终最佳值。
+- P7最终主要采用Stage 2到`144×144`的中分辨率直连，而P8第1轮又证明输入侧高分辨率特征具有价值。普通长条卷积严格对照尚未完成，因此目前只能确认高分辨率细线旁路有效，不能确认动态蛇形采样具有独立收益。
 
 ## 环境与目录约束
 

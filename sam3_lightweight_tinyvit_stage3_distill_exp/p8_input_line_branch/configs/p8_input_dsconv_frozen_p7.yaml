@@ -1,0 +1,27 @@
+experiment: TinyViT-P8-Input-DSConv-Frozen-P7
+initial_weights: ../../weights/p7_highres_fpn_frozen_p6.epoch9.pt
+
+input_branch:
+  input: RGB-1008
+  lossless_rearrange: PixelUnshuffle-2
+  working_resolution: 504
+  stem_channels: 16
+  operator: dsconv
+  line_channels_per_direction: 16
+  kernel_size: 9
+  offset_scale: 1.0
+  semantic_gate_source: FPN-144
+  output_target: FPN-288
+  residual_gate_init: 0.0
+
+frozen:
+  p7_all_existing_parameters: true
+
+training:
+  epochs: 5
+  batch_size_per_gpu: 4
+  devices: 4
+  branch_lr: 1.0e-4
+  gate_lr: 1.0e-3
+  precision: bf16-mixed
+  save_every_epoch: true

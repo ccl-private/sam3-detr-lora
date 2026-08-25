@@ -122,7 +122,18 @@ def main() -> None:
         image_lora_stages=tuple(meta["image_lora_stages"]),
     )
     model_label = "tinyvit_p0_image_lora"
-    if bool(meta.get("p7_highres_fpn", False)):
+    if bool(meta.get("p8_input_line_branch", False)):
+        p8_dir = EXP_DIR / "p8_input_line_branch"
+        p7_dir = EXP_DIR / "p7_highres_fpn"
+        p6_dir = EXP_DIR / "p6_multiscale_dsconv"
+        for path in (p8_dir, p7_dir, p6_dir):
+            if str(path) not in sys.path:
+                sys.path.insert(0, str(path))
+        from input_line_branch import attach_p8_from_checkpoint
+
+        attach_p8_from_checkpoint(model, args.weights)
+        model_label = f"tinyvit_p8_input_{meta.get('p8_operator', 'dsconv')}"
+    elif bool(meta.get("p7_highres_fpn", False)):
         p7_dir = EXP_DIR / "p7_highres_fpn"
         p6_dir = EXP_DIR / "p6_multiscale_dsconv"
         for path in (p7_dir, p6_dir):
@@ -153,6 +164,7 @@ def main() -> None:
         "dot_prod_scoring.", "segmentation_head.", P5_BRANCH_PREFIX,
         "p6_stage1_thin_line_branch.",
         "p7_highres_fpn_adapters.",
+        "p8_input_line_branch.",
     )
     missing = [key for key in missing if "parametrizations" in key or key.startswith(trained_prefixes)]
     unexpected = [key for key in unexpected if "parametrizations" in key or key.startswith(trained_prefixes)]
