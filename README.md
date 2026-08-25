@@ -286,3 +286,11 @@ P7和P8在这3张图上的逐图检测数及平均/最高置信度完全一致�
 ## 环境与目录约束
 
 当前运行环境以仓库内`.venv`和根目录[requirements.txt](requirements.txt)为准。根README只记录路线和横向结果；模型结构、下载、训练命令、日志与完整测试说明放在对应实验目录。缓存、权重、日志和`tests/output`不提交Git。
+
+## 模型体积与部署导出
+
+当前本地Stage-3基模和实验checkpoint存在重复权重，不能将两个文件的大小直接相加作为最终推理
+模型体积。TinyViT P8当前使用约469.98 MiB基模和139.00 MiB实验checkpoint，但LoRA合并、训练头
+覆盖并删除tracker备份后，预计完整运行时文本模型约400.31 MiB FP32或200.16 MiB FP16；固定
+道路标线词表并移除MobileCLIP后约119 MiB FP16。各实验的实际本地文件、可合并模块、计算公式和
+正式导出TODO见[轻量模型体积、权重合并与最终推理包分析](sam3_lightweight_tinyvit_stage3_distill_exp/模型体积与合并分析.md)。

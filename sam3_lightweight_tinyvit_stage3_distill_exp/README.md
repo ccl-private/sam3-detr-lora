@@ -4,6 +4,11 @@
 
 所有 TinyViT 相关代码、配置、日志、权重和测试都只放在本目录。测试产物位于 `tests/output/`，不提交 Git。
 
+模型文件不能用“Stage-3基模大小 + LoRA checkpoint大小”直接相加：当前LoRA保存器重复保存了约
+116 MiB的`weight.original`，而P5～P8只有约5.27 MiB是真正新增、无法折叠的结构。各阶段实际
+文件组成、LoRA可合并范围、最终FP32/FP16推理体积和正式导出TODO见
+[模型体积与合并分析](模型体积与合并分析.md)。
+
 ## 固定条件
 
 - 学生基模：官方 Stage-3 TV-M，TinyViT-11M + MobileCLIP-S0。
@@ -22,6 +27,7 @@ TinyViT 是一个图像编码器，内部按分辨率分为 stage 0～3。它包
 ```text
 sam3_lightweight_tinyvit_stage3_distill_exp/
 ├── README.md                         # 本实验总览
+├── 模型体积与合并分析.md             # 实际权重组成、合并方式和部署体积
 ├── train_p0_image_lora.py            # P0训练入口
 ├── image_lora.py                     # TinyViT图像LoRA注入
 ├── model_adapter.py                  # TinyViT Stage-3模型构建
