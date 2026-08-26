@@ -116,7 +116,7 @@
   └→ P5从P2最佳增加Stage 2 DSConv
        → P6从P5任务最佳增加Stage 1 DSConv
        → P7从P6任务最佳直连高/中分辨率FPN
-       → P8从P7任务最佳增加输入侧504分辨率细线分支（训练中）
+       → P8从P7任务最佳增加输入侧504分辨率细线分支（完成5轮，epoch 4任务最佳）
 ```
 
 ### 4.1 P0：最终输出KD与图像LoRA
@@ -201,9 +201,9 @@
 - 位置：[p8_input_line_branch](sam3_lightweight_tinyvit_stage3_distill_exp/p8_input_line_branch/README.md)
 - 起点：P7 epoch 9任务最佳权重；冻结P7和此前全部参数。
 - 改动：将`1008×1008` RGB输入通过`PixelUnshuffle(2)`无损重排为`12×504×504`，先用水平/垂直DSConv提取原图侧细线特征，再融合到`288×288` FPN；只训练83,827个新参数。
-- 训练：已完成计划的5轮；当前统一10图正式评测只保留epoch 0结果，尚未补齐epoch 1～4同口径评测。
-- 第1轮阶段结果：白实线IoU/Recall为0.6511/0.7758，白虚线IoU/Recall为0.5800/0.6737，平均IoU为0.6155，比P7提高0.0152，已经超过P8预设0.610验收线。
-- 阶段结论：输入侧真正的504分辨率细线提取同时改善loss与epoch 0实际IoU，方向有效；但必须补齐5轮统一评测后才能确定正式任务最佳权重。DSConv与普通长条卷积的严格对照仍未完成。
+- 训练：完整完成5轮（epoch 0～4），并逐轮完成相同10图、7提示、阈值0.5的统一评测；验证loss和任务IoU均持续改善，任务最佳为epoch 4。
+- 最终结果：白实线IoU/Recall为0.6772/0.7900，白虚线IoU/Recall为0.5960/0.6883，平均IoU为0.6366，比P7提高0.0363，比P8 epoch 0提高0.0210。
+- 结论：输入侧真正的504分辨率细线提取有效，且5轮内尚未出现任务指标回退；但相对Base + DETR LoRA的平均IoU 0.7021仍差0.0655。DSConv与普通长条卷积的严格对照仍未完成。
 
 ## 5. Base域外负提示回溯消融
 
@@ -238,7 +238,7 @@
 | TinyViT P5（epoch 15） | [p5_dsconv_thin_line](sam3_lightweight_tinyvit_stage3_distill_exp/p5_dsconv_thin_line/README.md) | 0.5746 | 0.7308 | 0.4967 | 0.5957 | 0.5357 |
 | TinyViT P6（epoch 8） | [p6_multiscale_dsconv](sam3_lightweight_tinyvit_stage3_distill_exp/p6_multiscale_dsconv/README.md) | 0.6214 | 0.7486 | 0.5610 | 0.6524 | 0.5912 |
 | TinyViT P7（epoch 9） | [p7_highres_fpn](sam3_lightweight_tinyvit_stage3_distill_exp/p7_highres_fpn/README.md) | 0.6319 | 0.7603 | 0.5687 | 0.6604 | 0.6003 |
-| TinyViT P8（epoch 0，阶段结果） | [p8_input_line_branch](sam3_lightweight_tinyvit_stage3_distill_exp/p8_input_line_branch/README.md) | 0.6511 | 0.7758 | 0.5800 | 0.6737 | 0.6155 |
+| TinyViT P8（epoch 4，正式最佳） | [p8_input_line_branch](sam3_lightweight_tinyvit_stage3_distill_exp/p8_input_line_branch/README.md) | 0.6772 | 0.7900 | 0.5960 | 0.6883 | 0.6366 |
 
 早期TinyViT-S和EfficientViT P0蒸馏没有可复核的统一IoU/Recall，因此不放入数值排名。不同阶段的loss组成不同，跨实验应比较上表的实际IoU和Recall，不能直接比较`val/loss`。
 
@@ -307,8 +307,8 @@ P7和P8在这3张图上的逐图检测数及平均/最高置信度完全一致�
 - P4严格对照已经完成：完整解冻Stage 3与neck后最佳平均IoU为0.4422，低于同起点Control的0.4546。验证loss虽下降，实际任务指标反而变差，因此该方向判定无效。
 - 当前不建议继续提高LoRA秩、延长P4训练或扩大解冻范围。
 - P5在冻结P2的条件下增加Stage 2 DSConv分支，平均IoU达到0.5357；P6冻结P5并增加Stage 1 DSConv，达到0.5912；P7冻结P6并把方向特征直连高/中分辨率FPN，达到0.6003。这条结构改造路线的收益明显大于提高LoRA秩或完整解冻。
-- P8进一步从输入侧504分辨率先提取细线再下采样，第1轮平均IoU达到0.6155，比P7提高0.0152；5轮训练已结束，但逐轮统一评测未补齐，该值仍只作为阶段结果。
-- P7最终主要采用Stage 2到`144×144`的中分辨率直连，而P8第1轮又证明输入侧高分辨率特征具有价值。普通长条卷积严格对照尚未完成，因此目前只能确认高分辨率细线旁路有效，不能确认动态蛇形采样具有独立收益。
+- P8进一步从输入侧504分辨率先提取细线再下采样，5轮任务指标单调提升；epoch 4平均IoU达到0.6366，比P7提高0.0363，确认为正式任务最佳权重。
+- P7最终主要采用Stage 2到`144×144`的中分辨率直连，而P8完整5轮进一步证明输入侧高分辨率特征具有价值。普通长条卷积严格对照尚未完成，因此目前只能确认高分辨率细线旁路有效，不能确认动态蛇形采样具有独立收益。
 - 泛化检查必须区分两个维度：旧正式Base教师和轻量化P0～P8丢失了`car`开放词汇能力；Base回溯消融关闭域外纯负提示后已恢复到20个检测。P8对3张网络域外道路图仍保留了道路标线类别内部的跨形态泛化。
 - 原始SAM3支持负查询与Presence训练，但“每图再随机加入2个`person/dog/cat...`通用词作为纯负提示”来自外部`SAM3_LoRA`项目的自定义策略。严格单变量回溯已经验证：关闭这些域外纯负提示后，`car`由0恢复到20且平均IoU提高到0.7483，因此该策略是当前已确认的退化主因。完整证据与后续泛化测试见[多提示负训练专项TODO](sam3_detr_exp/docs/multi-prompt-negative-training-todo.md)。
 
