@@ -83,6 +83,15 @@ def build_parser() -> ArgumentParser:
     parser.add_argument("--generic-prompt", type=str, default="crack")
     parser.add_argument("--max-train-samples", type=int, default=None)
     parser.add_argument("--max-val-samples", type=int, default=None)
+    parser.add_argument(
+        "--num-generic-negatives",
+        type=int,
+        default=None,
+        help=(
+            "Override prompt_training.num_negatives from YAML for training; "
+            "use 0 to disable out-of-domain generic negative prompts."
+        ),
+    )
     parser.add_argument("--resolution", type=int, default=1008)
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--batch-size", type=int, default=1)
@@ -119,6 +128,12 @@ def build_parser() -> ArgumentParser:
     parser.add_argument("--limit-train-batches", type=float, default=1.0)
     parser.add_argument("--limit-val-batches", type=float, default=1.0)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--log-dir",
+        type=Path,
+        default=None,
+        help="Lightning output directory (default: Lightning's current-directory default).",
+    )
     return parser
 
 
@@ -145,11 +160,13 @@ def main() -> None:
         num_workers=args.num_workers,
         max_train_samples=args.max_train_samples,
         max_val_samples=args.max_val_samples,
+        num_generic_negatives=args.num_generic_negatives,
     )
     datamodule.setup("fit")
     print(
         f"train samples={len(datamodule.train_dataset) if datamodule.train_dataset is not None else 0} "
         f"mode={'multi_prompt' if datamodule.train_dataset and datamodule.train_dataset.multi_prompt else 'single_prompt'} "
+        f"num_generic_negatives={datamodule.train_dataset.num_generic_negatives if datamodule.train_dataset is not None else 'n/a'} "
         f"yaml={args.data_yaml}"
     )
     if datamodule.val_dataset is not None:
@@ -183,6 +200,7 @@ def main() -> None:
     best_callback = SaveBestLora(best_save)
 
     trainer = L.Trainer(
+        default_root_dir=args.log_dir,
         accelerator=args.accelerator,
         devices=args.devices,
         strategy="ddp_find_unused_parameters_true" if args.devices > 1 else "auto",

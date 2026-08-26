@@ -13,7 +13,8 @@
 - `compare_video_original_vs_modular.py`：验证原始模型与模块化视频推理一致性。
 - `train_detr_lora.py`：道路标线DETR LoRA训练入口。
 - `configs/roadline_lora.yaml`：道路标线类别和训练配置。
-- `weights_lora/roadline_r8_a16_lr2e4.best.pt`：当前用于统一对比和蒸馏的教师权重。
+- `weights_lora/roadline_r8_a16_lr2e4.best.pt`：历史上用于轻量化蒸馏的教师权重。
+- `negative_prompt_ablation/`：项目后期回溯完成的域外负提示消融；当前道路标线Base最佳结果。
 
 ## 模块化权重
 
@@ -73,11 +74,18 @@ LoRA挂载范围、冻结策略、损失和保存加载方式见[DETR LoRA微调
 1. SAM3模块拆分实验成功，完整模型可以按功能模块独立保存、加载和重组，为局部微调与模块替换提供了基础。
 2. SAM3 DETR LoRA道路标线微调成功，在冻结Base图像与文本骨干的情况下取得白实线0.7235、白虚线0.6808的IoU，成为后续五条实验线的效果上限和蒸馏教师。
 
+项目完成TinyViT P8后又回到本目录排查开放类别退化，形成了一个不改变历史主线顺序的重要发现：
+[关闭域外负提示消融](negative_prompt_ablation/README.md)完整训练20轮后，最佳`val/loss=4.1741`，
+统一10图白实线/白虚线IoU达到0.7520/0.7445，平均0.7483，同时固定同图`car`检测从旧教师的0
+恢复到20。由此，旧教师继续作为历史蒸馏起点记录，但不再是当前Base效果上限；新的正式训练默认
+关闭没有正样本配对的域外通用负提示。
+
 由于本次LoRA训练未跑满命令中的20轮，后续引用结果时应同时注明“完成8轮验证、最佳epoch 4”，不能只写计划训练轮数。
 
 ## 目录文档
 
 - [模块化权重与完整数据流](docs/modular-weights.md)
+- [域外负提示消融实验](negative_prompt_ablation/README.md)
 - [DETR LoRA微调实现](docs/detr-lora-finetune.md)
 - [正式训练命令](docs/train-detr-lora-command.md)
 - [多提示负样本训练待办](docs/multi-prompt-negative-training-todo.md)

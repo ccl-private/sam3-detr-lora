@@ -1,0 +1,29 @@
+path: /slow_disk/ccl/data/roadline20251023
+train: video_disjoint/train
+val: video_disjoint/val
+
+names:
+  0: white solid lane line
+  1: yellow solid lane line
+  2: white dashed lane line
+  3: yellow dashed lane line
+  4: zebra crossing
+  5: lane barrier
+  6: road teeth marking
+
+prompt_training:
+  mode: multi_prompt
+  num_negatives: 0
+  generic_negatives:
+    - person
+    - dog
+    - cat
+    - chair
+    - table
+    - bottle
+    - phone
+    - bird
+    - flower
+    - window
+    - door
+

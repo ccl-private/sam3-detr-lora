@@ -150,6 +150,7 @@ class YoloSegmentationDataset(Dataset):
         generic_prompt: str,
         prompt_training: dict | None = None,
         include_generic_negatives: bool = False,
+        num_generic_negatives: int | None = None,
         max_samples: int | None = None,
     ):
         self.split_dir = split_dir
@@ -160,7 +161,12 @@ class YoloSegmentationDataset(Dataset):
         self.prompt_training = prompt_training or {}
         self.multi_prompt = self.prompt_training.get("mode", "single_prompt") == "multi_prompt"
         self.include_generic_negatives = include_generic_negatives
-        self.num_generic_negatives = int(self.prompt_training.get("num_negatives", 0))
+        configured_num_negatives = int(self.prompt_training.get("num_negatives", 0))
+        self.num_generic_negatives = (
+            configured_num_negatives
+            if num_generic_negatives is None
+            else int(num_generic_negatives)
+        )
         raw_generic_negatives = self.prompt_training.get("generic_negatives", []) or []
         if not isinstance(raw_generic_negatives, list):
             raise ValueError("prompt_training.generic_negatives must be a list")
@@ -315,6 +321,7 @@ class CrackYoloSegDataModule(L.LightningDataModule):
         num_workers: int = 0,
         max_train_samples: int | None = None,
         max_val_samples: int | None = None,
+        num_generic_negatives: int | None = None,
     ):
         super().__init__()
         self.data_yaml = data_yaml
@@ -325,6 +332,7 @@ class CrackYoloSegDataModule(L.LightningDataModule):
         self.num_workers = num_workers
         self.max_train_samples = max_train_samples
         self.max_val_samples = max_val_samples
+        self.num_generic_negatives = num_generic_negatives
         self.train_dataset: YoloSegmentationDataset | None = None
         self.val_dataset: YoloSegmentationDataset | None = None
 
@@ -339,6 +347,7 @@ class CrackYoloSegDataModule(L.LightningDataModule):
                 generic_prompt=self.generic_prompt,
                 prompt_training=config.prompt_training,
                 include_generic_negatives=True,
+                num_generic_negatives=self.num_generic_negatives,
                 max_samples=self.max_train_samples,
             )
 
@@ -351,6 +360,7 @@ class CrackYoloSegDataModule(L.LightningDataModule):
                     generic_prompt=self.generic_prompt,
                     prompt_training=config.prompt_training,
                     include_generic_negatives=False,
+                    num_generic_negatives=self.num_generic_negatives,
                     max_samples=self.max_val_samples,
                 )
 

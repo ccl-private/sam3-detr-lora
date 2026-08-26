@@ -69,6 +69,7 @@ prompt_training:
 | `--generic-prompt` | `prompt-mode=generic` 时的文本 | 仅通用提示实验使用 |
 | `--max-train-samples` | 最多加载的训练图片数 | 正式训练不设置 |
 | `--max-val-samples` | 最多加载的验证图片数 | 正式训练不设置 |
+| `--num-generic-negatives` | 覆盖YAML中的每图域外负提示数量；`0`表示关闭 | 默认不覆盖YAML |
 
 multi-prompt 模式下，`max_*_samples` 和 `batch-size` 都按图片计数，不按展开后的提示词数量计数。
 
@@ -123,6 +124,7 @@ multi-prompt 会继续把每张图展开为多个文本提示，因此不要用�
 | `--save` | 最后一个 epoch 的 LoRA checkpoint |
 | `--best-save` | 最低 `val/loss` 的 checkpoint；不设置时自动在 `--save` 文件名中加入 `.best` |
 | `--seed` | 随机种子，默认 42 |
+| `--log-dir` | Lightning日志根目录；用于把专项实验日志隔离到对应目录 |
 
 例如 `--save weights/run01.pt` 会默认产生：
 
