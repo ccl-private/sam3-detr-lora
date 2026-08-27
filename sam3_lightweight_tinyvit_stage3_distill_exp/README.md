@@ -12,7 +12,9 @@
 ## 固定条件
 
 - 学生基模：官方 Stage-3 TV-M，TinyViT-11M + MobileCLIP-S0。
-- 教师：P0～P8使用历史`roadline_r8_a16_lr2e4.best.pt`；P9改用关闭域外纯负提示后的`roadline_r8_a16_lr2e4_no_generic_negatives.best.pt`。
+- 教师：P0～P8使用历史`roadline_r8_a16_lr2e4.best.pt`；P9改用“Base回溯消融：无域外负提示”
+  训练得到的`roadline_r8_a16_lr2e4_no_generic_negatives.best.pt`。后文“新Base教师”均指这同一个
+  回溯消融最佳模型，不是另一个独立模型。
 - 文本提示：道路标线配置中的 7 个固定类别，文本编码器冻结并实时提取特征。
 - DETR：Encoder/Decoder 注意力和 FFN 使用 r8 LoRA。
 - 头部：完整训练点积分类头和分割头。
@@ -56,7 +58,7 @@ sam3_lightweight_tinyvit_stage3_distill_exp/
 | Base + DETR LoRA | `../sam3_detr_exp/` | 当前道路标线效果上限和教师模型 |
 | EfficientViT Stage-3 LoRA | `../sam3_lightweight_stage3_exp/` | 早期轻量骨干基线 |
 | P0历史教师输出缓存 | `../sam3_lightweight_stage3_distill_exp/cache/p0_teacher/` | 旧Base最终输出软目标，供P0～P8复用 |
-| P9新教师输出缓存 | `p9_fresh_p8_new_teacher/cache/new_teacher_outputs/` | 无域外负提示的新Base软目标，只含7个道路标线提示 |
+| P9新教师输出缓存 | `p9_fresh_p8_new_teacher/cache/new_teacher_outputs/` | 来自Base回溯消融无域外负提示最佳模型，只含7个道路标线提示 |
 
 ## 实验路线
 
@@ -222,7 +224,7 @@ P3先把P2最佳权重中的图像r8和DETR r8 LoRA增量分别合并进对应�
 | P4解冻最佳（epoch 1） | `p4_unfreeze_stage3_neck/` | 0.5180 | 0.6801 | 0.3664 | 0.4652 | 0.4422 |
 | P9新教师从头蒸馏（epoch 19） | `p9_fresh_p8_new_teacher/` | 0.6284 | 0.6869 | 0.6595 | 0.7543 | 0.6439 |
 | Base + DETR LoRA | `../sam3_detr_exp/` | 0.7235 | 0.7883 | 0.6808 | 0.8226 | 0.7021 |
-| 新Base教师（无域外负提示） | `../sam3_detr_exp/negative_prompt_ablation/` | 0.7520 | 0.8608 | 0.7445 | 0.8423 | 0.7483 |
+| 新Base教师（即Base回溯消融：无域外负提示） | `../sam3_detr_exp/negative_prompt_ablation/` | 0.7520 | 0.8608 | 0.7445 | 0.8423 | 0.7483 |
 
 P0到P1的实际变化：
 
@@ -254,7 +256,7 @@ P2之后的结构实验目前把两类平均IoU从0.4553提高到P8 epoch 4的0.
 | P8（正式最佳） | P7 epoch 9 | 5轮，最佳epoch 4 | 0.6772 | 0.5960 | 0.6366 | 输入侧504分辨率分支持续有效，相对P7提高0.0363 |
 | P9 | 官方TinyViT + P8完整结构 | 20轮，最佳epoch 19 | 0.6284 | 0.6595 | 0.6439 | 新教师从头蒸馏小幅超过P8，主要改善白虚线，`car`泛化恢复 |
 | Base + DETR LoRA | Base权重 | 10轮内提前停止 | 0.7235 | 0.6808 | 0.7021 | 当前教师与效果上限 |
-| 新Base教师 | Base权重 | 20轮，最佳epoch 13 | 0.7520 | 0.7445 | 0.7483 | P9教师与当前效果上限 |
+| 新Base教师（Base回溯消融无域外负提示模型） | 原始Base重新训练 | 20轮，最佳epoch 13 | 0.7520 | 0.7445 | 0.7483 | P9实际使用的教师与当前效果上限 |
 
 P7相对P6平均IoU只提高0.0091，低于预设的0.02明确增益门槛；最终`gate_high=-0.0171`、`gate_mid=0.7620`，说明Stage 1方向特征简单插值到`288×288`没有被模型有效采用，Stage 2到`144×144`才是主要增益来源。
 

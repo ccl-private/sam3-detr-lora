@@ -4,6 +4,13 @@
 
 因此，本项目不是单一的轻量化实验。SAM3模块化和Base DETR LoRA微调本身就是已经完成的核心成果，轻量化与蒸馏是建立在它们之上的后续研究。五个实验目录按实际发生顺序形成如下路线：
 
+> **统一术语：**本文所称“新Base教师”，就是第5步“Base回溯消融：无域外负提示”训练得到的
+> 同一个模型，正式权重为
+> `sam3_detr_exp/negative_prompt_ablation/weights/roadline_r8_a16_lr2e4_no_generic_negatives.best.pt`。
+> 它从原始SAM3 Base重新训练，保留7个道路标线类别之间的内部负提示，只关闭每图额外加入的
+> `person/dog/cat...`域外纯负提示；统一10图平均IoU为0.7483，固定首图`car`检测20个。P9使用的
+> “新教师”就是该权重，不是另一个额外模型。
+
 ```text
 0. SAM3 Base模块化与DETR LoRA
    ├── 把完整SAM3拆成可独立加载和重组的功能模块
@@ -246,7 +253,8 @@ SAM3原生loss和验证数据保持该项目实现不变，只把验证提示改
 - 位置：[p9_fresh_p8_new_teacher](sam3_lightweight_tinyvit_stage3_distill_exp/p9_fresh_p8_new_teacher/README.md)
 - 起点：作者官方TinyViT Stage-3，不继承P0～P8任何学生LoRA、输出头或细线分支训练权重。
 - 结构：从训练开始一次性挂载P5～P8完整细线结构，并训练Stage 1/2/3图像LoRA、DETR LoRA、两个输出头和全部新增分支。
-- 教师：使用第5步无域外负提示的新Base权重，统一10图平均IoU为0.7483且`car`恢复到20。
+- 教师：使用第5步“Base回溯消融：无域外负提示”的最佳权重，即本文统一称呼的“新Base教师”
+  `roadline_r8_a16_lr2e4_no_generic_negatives.best.pt`；统一10图平均IoU为0.7483且`car`恢复到20。
 - 负提示：教师缓存和学生训练均关闭域外纯负提示，只保留7类道路标线之间的数据集内负提示。
 - 训练：四卡完整完成20轮，epoch 19最低`val/loss=8.5787`、`val/supervised=4.8604`。
 - 道路标线：白实线IoU/Recall为0.6284/0.6869，白虚线为0.6595/0.7543，平均IoU为0.6439；
@@ -261,7 +269,7 @@ SAM3原生loss和验证数据保持该项目实现不变，只把验证提示改
 | 阶段 | 所属目录 | 白实线IoU | 白实线Recall | 白虚线IoU | 白虚线Recall | 平均IoU |
 |---|---|---:|---:|---:|---:|---:|
 | Base + DETR LoRA | [sam3_detr_exp](sam3_detr_exp/README.md) | 0.7235 | 0.7883 | 0.6808 | 0.8226 | 0.7021 |
-| Base回溯消融：无域外负提示 | [negative_prompt_ablation](sam3_detr_exp/negative_prompt_ablation/README.md) | 0.7520 | 0.8608 | 0.7445 | 0.8423 | 0.7483 |
+| 新Base教师（即Base回溯消融：无域外负提示） | [negative_prompt_ablation](sam3_detr_exp/negative_prompt_ablation/README.md) | 0.7520 | 0.8608 | 0.7445 | 0.8423 | 0.7483 |
 | EfficientViT Stage-3 LoRA | [sam3_lightweight_stage3_exp](sam3_lightweight_stage3_exp/README.md) | 0.3905 | 0.5137 | 0.2153 | 0.2403 | 0.3029 |
 | TinyViT P0 | [TinyViT实验根目录](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 0.5187 | 0.6676 | 0.3400 | 0.4139 | 0.4293 |
 | TinyViT P1 | [p1_image_feature](sam3_lightweight_tinyvit_stage3_distill_exp/p1_image_feature/README.md) | 0.5343 | 0.6863 | 0.3490 | 0.4279 | 0.4417 |
@@ -290,7 +298,7 @@ SAM3原生loss和验证数据保持该项目实现不变，只把验证提示改
 | Base早期`detr_lora.pt` | 11 | 早期微调仍保留开放类别能力 |
 | Base早期`roadline_sam3_loss_lora.best.pt` | 20 | 早期SAM3-loss版本仍能检测车辆 |
 | 当前正式Base教师`roadline_r8_a16_lr2e4.best.pt` | 0 | 正式多提示道路标线训练后已丢失`car` |
-| Base回溯消融：无域外负提示 | 20 | 保留内部负提示，只关闭域外纯负提示后恢复 |
+| 新Base教师（即Base回溯消融：无域外负提示） | 20 | P9所用教师；保留内部负提示，只关闭域外纯负提示后恢复 |
 | EfficientViT道路标线最佳权重 | 0 | TinyViT P0继承它的DETR LoRA与输出头时，能力已经丢失 |
 | TinyViT P2 / P7 / P8 | 0 / 0 / 0 | P2在阈值降到0.1后仍为0，P5～P8不是首次发生退化的位置 |
 | TinyViT P9新教师从头蒸馏 | 15 | 10图合计185个，人工检查首图mask确实覆盖车辆；泛化已恢复但尚未追平新Base教师 |
@@ -336,7 +344,8 @@ P7和P8在这3张图上的逐图检测数及平均/最高置信度完全一致�
 ## 当前结论与下一步
 
 - 项目早期已经成功完成SAM3模块拆分、重组验证和Base DETR LoRA道路标线微调；轻量化实验建立在这一成功结果上。
-- Base回溯消融把当前效果上限从旧教师平均IoU 0.7021刷新到0.7483；轻量模型的差距因此重新扩大。
+- Base回溯消融的无域外负提示模型已作为“新Base教师”，把当前效果上限从旧教师平均IoU 0.7021
+  刷新到0.7483；P9使用的就是该模型，轻量模型的差距因此重新扩大。
 - EfficientViT路线完整训练后效果不足，输出蒸馏也没有形成可量化改善，因此已经转向TinyViT。
 - TinyViT的最终输出KD、图像特征KD和扩大图像LoRA覆盖范围带来了连续小幅提升，但尚未接近Base。
 - P3把图像和DETR LoRA统一提高到r16后，平均IoU只比P2增加0.0010，白虚线指标反而略降；继续提高LoRA秩不再是优先路线。

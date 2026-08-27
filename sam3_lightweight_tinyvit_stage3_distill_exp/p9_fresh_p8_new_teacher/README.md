@@ -14,6 +14,8 @@ Base教师完整蒸馏20轮。
 - 学生基模：`sam3_lightweight_stage3_exp/input/efficientsam3_tinyvit_stage3.pt`。
 - 历史学生权重：不加载。
 - 教师：`sam3_detr_exp/negative_prompt_ablation/weights/roadline_r8_a16_lr2e4_no_generic_negatives.best.pt`。
+  该权重就是“Base回溯消融：无域外负提示”的最佳模型，后文简称“新Base教师”；二者不是
+  两个模型。
 - 图像LoRA：TinyViT Stage 1/2/3，r8、alpha16。
 - DETR LoRA：Encoder/Decoder，r8、alpha16。
 - 完整训练点积分类头和分割头。
@@ -81,7 +83,7 @@ P9起点=官方TinyViT Stage-3，域外负提示=0
 |---|---:|---:|---:|---:|---:|---:|---:|
 | P8 epoch 4 | 0.6772 | 0.8258 | 0.7900 | 0.5960 | 0.8163 | 0.6883 | 0.6366 |
 | P9 epoch 19 | 0.6284 | 0.8805 | 0.6869 | 0.6595 | 0.8400 | 0.7543 | 0.6439 |
-| 新Base教师 | 0.7520 | 0.8561 | 0.8608 | 0.7445 | 0.8651 | 0.8423 | 0.7483 |
+| 新Base教师（Base回溯消融无域外负提示模型） | 0.7520 | 0.8561 | 0.8608 | 0.7445 | 0.8651 | 0.8423 | 0.7483 |
 
 P9相对P8平均IoU提高0.0074，收益主要来自白虚线IoU提高0.0635；白实线IoU反而下降0.0488。
 因此从官方TinyViT和新教师重新蒸馏有效但增益很小，没有达到0.68验收线；相对新Base教师仍差

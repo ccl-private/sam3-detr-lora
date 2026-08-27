@@ -15,6 +15,13 @@
 - 完整训练点积分类头和分割头，学习率`2e-4`；
 - 4卡、每卡图片batch 2，完整训练20轮。
 
+### 与后续实验的身份关系
+
+本实验的最佳模型
+`weights/roadline_r8_a16_lr2e4_no_generic_negatives.best.pt`就是后续文档统一称呼的
+**“新Base教师”**。它不是额外下载或另行训练的模型：它就是“Base回溯消融：无域外负提示”
+本身的产物。TinyViT P9使用该权重缓存教师输出并完成20轮从头蒸馏。
+
 训练入口新增`--num-generic-negatives`覆盖参数。不传时继续使用YAML中的
 `prompt_training.num_negatives`；传0时关闭训练阶段域外负提示。验证阶段原本就不随机加入域外
 负提示。

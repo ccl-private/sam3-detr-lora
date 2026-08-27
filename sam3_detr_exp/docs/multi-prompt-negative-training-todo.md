@@ -33,7 +33,7 @@ auxiliary/O2M loss、固定验证 loss、best checkpoint 和 4 卡 DDP 训练均
 | 早期 `detr_lora.pt` | 单正提示，早期简化 loss | 11 | 开放类别能力仍保留 |
 | 早期 `roadline_sam3_loss_lora.best.pt` | 单正提示，SAM3 原生 loss/Presence | 20 | 原生 loss/Presence 本身没有导致能力消失 |
 | 正式 `roadline_r8_a16_lr2e4.best.pt` | 多提示，包含数据集内与通用域外负提示 | 0 | 开放类别能力已经丢失 |
-| 回溯消融`roadline_r8_a16_lr2e4_no_generic_negatives.best.pt` | 多提示，只保留数据集内负提示 | 20 | 关闭域外纯负提示后恢复`car` |
+| 回溯消融`roadline_r8_a16_lr2e4_no_generic_negatives.best.pt`（后续称“新Base教师”） | 多提示，只保留数据集内负提示 | 20 | 关闭域外纯负提示后恢复`car`；也是TinyViT P9教师 |
 
 正式训练的一个已记录批次由 2 张图片展开为 18 个文本查询，其中 4 个正提示、10 个数据集内
 负提示、4 个通用域外负提示，负查询占 77.8%。这些结果形成了较强相关证据，但尚不能替代严格
