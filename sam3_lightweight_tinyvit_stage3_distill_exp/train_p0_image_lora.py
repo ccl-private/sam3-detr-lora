@@ -74,7 +74,7 @@ class P0DistillModule(L.LightningModule):
     def __init__(
         self,
         cache_root: Path,
-        student_lora: Path,
+        student_lora: Path | None,
         checkpoint: Path,
         resolution: int = 1008,
         lora_lr: float = 5e-5,
@@ -111,19 +111,25 @@ class P0DistillModule(L.LightningModule):
             image_lora_dropout=image_lora_dropout,
             image_lora_stages=image_lora_stages,
         )
-        payload = torch.load(student_lora, map_location="cpu", weights_only=False)
-        missing, unexpected = detector.load_state_dict(payload["state_dict"], strict=False)
-        missing = [
-            key for key in missing
-            if ("parametrizations" in key and not key.startswith(IMAGE_LORA_PREFIX))
-            or key.startswith(("dot_prod_scoring.", "segmentation_head."))
-        ]
-        unexpected = [key for key in unexpected if "parametrizations" in key or key.startswith(("dot_prod_scoring.", "segmentation_head."))]
-        if missing or unexpected:
-            raise RuntimeError(f"学生 LoRA 不匹配：missing={missing}, unexpected={unexpected}")
+        if student_lora is not None:
+            payload = torch.load(student_lora, map_location="cpu", weights_only=False)
+            missing, unexpected = detector.load_state_dict(payload["state_dict"], strict=False)
+            missing = [
+                key for key in missing
+                if ("parametrizations" in key and not key.startswith(IMAGE_LORA_PREFIX))
+                or key.startswith(("dot_prod_scoring.", "segmentation_head."))
+            ]
+            unexpected = [key for key in unexpected if "parametrizations" in key or key.startswith(("dot_prod_scoring.", "segmentation_head."))]
+            if missing or unexpected:
+                raise RuntimeError(f"学生 LoRA 不匹配：missing={missing}, unexpected={unexpected}")
+            self.student_source_meta = payload.get("meta", {})
+        else:
+            self.student_source_meta = {
+                "student_initialization": "official TinyViT Stage-3",
+                "base_checkpoint": str(Path(checkpoint)),
+            }
         self.detector = detector
         self.attached_lora_modules = attached
-        self.student_source_meta = payload.get("meta", {})
         self.matcher = BinaryHungarianMatcherV2(
             focal=True, cost_class=2.0, cost_bbox=5.0, cost_giou=2.0,
             alpha=0.25, gamma=2.0, stable=False,

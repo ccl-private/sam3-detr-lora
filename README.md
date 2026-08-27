@@ -117,6 +117,7 @@
        → P6从P5任务最佳增加Stage 1 DSConv
        → P7从P6任务最佳直连高/中分辨率FPN
        → P8从P7任务最佳增加输入侧504分辨率细线分支（完成5轮，epoch 4任务最佳）
+  → P9回到官方TinyViT起点，一次挂载P8完整结构并改用无域外负提示的新Base教师（完成20轮）
 ```
 
 ### 4.1 P0：最终输出KD与图像LoRA
@@ -220,6 +221,39 @@
 - 结论：域外纯负提示既不是专项收敛所必需，还会破坏开放类别泛化。保留道路标线内部负提示、
   SAM3 Presence和多提示训练本身是可行的；今后正式训练默认关闭无正样本配对的域外负提示。
 
+### 5.1 与开源SAM3_LoRA的同口径验证loss复核
+
+为判断开源项目[SAM3_LoRA](https://github.com/Sompote/SAM3_LoRA)记录的较低验证loss是否代表
+更强的Base模型，使用其`outputs/roadline_lora/best_lora_weights.pt`进行了完整复核。模型加载、
+SAM3原生loss和验证数据保持该项目实现不变，只把验证提示改为本项目的固定7个道路标线类别，
+并关闭每图额外2个随机域外负提示。测试使用4卡、每卡图片batch 2，覆盖2343张验证图片、
+62193个标注，共1172个验证batch。
+
+| 模型与验证口径 | `val_loss` |
+|---|---:|
+| SAM3_LoRA原始记录：7类道路标线 + 每图2个域外负提示 | 3.674239 |
+| 同一SAM3_LoRA最佳权重：固定7类、无域外负提示 | 4.260781 |
+| 本项目Base回溯消融：固定7类、无域外负提示 | 4.174067 |
+
+同一SAM3_LoRA权重移除域外负提示后，验证loss上升0.586542（约13.8%）。这证明原始`3.674239`
+受到容易域外负样本参与分类和Presence平均的明显影响，不能直接与本项目固定7提示的loss比较。
+统一口径后，SAM3_LoRA为4.260781，本项目Base为4.174067；本项目低0.086714（约2.1%）。因此，
+当前证据不支持“SAM3_LoRA优于本项目Base”的判断；只按最终同口径验证loss，本项目Base略优，
+但两者差距不大。
+
+## 6. P9：原始TinyViT、P8完整结构与新教师从头蒸馏
+
+- 位置：[p9_fresh_p8_new_teacher](sam3_lightweight_tinyvit_stage3_distill_exp/p9_fresh_p8_new_teacher/README.md)
+- 起点：作者官方TinyViT Stage-3，不继承P0～P8任何学生LoRA、输出头或细线分支训练权重。
+- 结构：从训练开始一次性挂载P5～P8完整细线结构，并训练Stage 1/2/3图像LoRA、DETR LoRA、两个输出头和全部新增分支。
+- 教师：使用第5步无域外负提示的新Base权重，统一10图平均IoU为0.7483且`car`恢复到20。
+- 负提示：教师缓存和学生训练均关闭域外纯负提示，只保留7类道路标线之间的数据集内负提示。
+- 训练：四卡完整完成20轮，epoch 19最低`val/loss=8.5787`、`val/supervised=4.8604`。
+- 道路标线：白实线IoU/Recall为0.6284/0.6869，白虚线为0.6595/0.7543，平均IoU为0.6439；
+  比P8提高0.0074，但仍比新Base教师低0.1043，未达到0.68验收线。
+- 开放类别：固定首图`car`检测15个，10图合计185个；人工检查mask确实覆盖车辆，说明开放类别
+  能力没有再次丢失，但首图仍低于新Base教师的20个。
+
 ## 统一结果对比
 
 统一结果使用相同10张道路图片、相同文本提示和置信度阈值0.5。测试集只有白实线和白虚线真值，其他类别只能观察误检。
@@ -239,6 +273,7 @@
 | TinyViT P6（epoch 8） | [p6_multiscale_dsconv](sam3_lightweight_tinyvit_stage3_distill_exp/p6_multiscale_dsconv/README.md) | 0.6214 | 0.7486 | 0.5610 | 0.6524 | 0.5912 |
 | TinyViT P7（epoch 9） | [p7_highres_fpn](sam3_lightweight_tinyvit_stage3_distill_exp/p7_highres_fpn/README.md) | 0.6319 | 0.7603 | 0.5687 | 0.6604 | 0.6003 |
 | TinyViT P8（epoch 4，正式最佳） | [p8_input_line_branch](sam3_lightweight_tinyvit_stage3_distill_exp/p8_input_line_branch/README.md) | 0.6772 | 0.7900 | 0.5960 | 0.6883 | 0.6366 |
+| TinyViT P9（epoch 19，新教师从头蒸馏） | [p9_fresh_p8_new_teacher](sam3_lightweight_tinyvit_stage3_distill_exp/p9_fresh_p8_new_teacher/README.md) | 0.6284 | 0.6869 | 0.6595 | 0.7543 | 0.6439 |
 
 早期TinyViT-S和EfficientViT P0蒸馏没有可复核的统一IoU/Recall，因此不放入数值排名。不同阶段的loss组成不同，跨实验应比较上表的实际IoU和Recall，不能直接比较`val/loss`。
 
@@ -258,12 +293,14 @@
 | Base回溯消融：无域外负提示 | 20 | 保留内部负提示，只关闭域外纯负提示后恢复 |
 | EfficientViT道路标线最佳权重 | 0 | TinyViT P0继承它的DETR LoRA与输出头时，能力已经丢失 |
 | TinyViT P2 / P7 / P8 | 0 / 0 / 0 | P2在阈值降到0.1后仍为0，P5～P8不是首次发生退化的位置 |
+| TinyViT P9新教师从头蒸馏 | 15 | 10图合计185个，人工检查首图mask确实覆盖车辆；泛化已恢复但尚未追平新Base教师 |
 
 回溯消融已经把主要原因从宽泛的“专项训练链路”收窄到域外纯负提示：新实验仍保留全部7个道路
 标线提示、数据集内部空目标、SAM3 Presence loss以及点积分类头和分割头训练，只移除每图2个
 `person/dog/cat...`域外负提示，`car`便从0恢复到20。因此不能把退化归因于TinyViT、P8、
-Presence或多提示机制本身。轻量化P0～P8继承的是已经退化的教师/学生输出体系，尚未用新Base重新
-蒸馏，所以其开放类别能力不会自动恢复。
+Presence或多提示机制本身。轻量化P0～P8继承的是已经退化的教师/学生输出体系，所以其开放类别
+能力不会自动恢复；P9改用无域外负提示的新Base教师并从官方TinyViT重新蒸馏后，`car`首图恢复
+到15个、10图合计185个，进一步验证教师与训练提示构造会直接影响学生的开放类别能力。
 
 ### 同类别跨形态泛化：道路标线能力成功保留
 
@@ -294,7 +331,7 @@ P7和P8在这3张图上的逐图检测数及平均/最高置信度完全一致�
 | [sam3_lightweight_exp](sam3_lightweight_exp/README.md) | 第1步：早期轻量化可行性验证 |
 | [sam3_lightweight_stage3_exp](sam3_lightweight_stage3_exp/README.md) | 第2步：EfficientViT Stage-3直接LoRA基线 |
 | [sam3_lightweight_stage3_distill_exp](sam3_lightweight_stage3_distill_exp/README.md) | 第3步：EfficientViT最终输出蒸馏 |
-| [sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 第4步：TinyViT P0～P8连续蒸馏、DSConv、多尺度融合与输入侧细线分支主线 |
+| [sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 第4、6步：TinyViT P0～P8连续结构实验，以及P9新教师从头蒸馏 |
 
 ## 当前结论与下一步
 
@@ -308,8 +345,9 @@ P7和P8在这3张图上的逐图检测数及平均/最高置信度完全一致�
 - 当前不建议继续提高LoRA秩、延长P4训练或扩大解冻范围。
 - P5在冻结P2的条件下增加Stage 2 DSConv分支，平均IoU达到0.5357；P6冻结P5并增加Stage 1 DSConv，达到0.5912；P7冻结P6并把方向特征直连高/中分辨率FPN，达到0.6003。这条结构改造路线的收益明显大于提高LoRA秩或完整解冻。
 - P8进一步从输入侧504分辨率先提取细线再下采样，5轮任务指标单调提升；epoch 4平均IoU达到0.6366，比P7提高0.0363，确认为正式任务最佳权重。
+- P9从官方TinyViT与P8完整结构重新开始，改用无域外负提示的新Base教师完整蒸馏20轮；平均IoU为0.6439，只比P8提高0.0074，主要收益集中在白虚线，尚未缩小到接近Base的程度。
 - P7最终主要采用Stage 2到`144×144`的中分辨率直连，而P8完整5轮进一步证明输入侧高分辨率特征具有价值。普通长条卷积严格对照尚未完成，因此目前只能确认高分辨率细线旁路有效，不能确认动态蛇形采样具有独立收益。
-- 泛化检查必须区分两个维度：旧正式Base教师和轻量化P0～P8丢失了`car`开放词汇能力；Base回溯消融关闭域外纯负提示后已恢复到20个检测。P8对3张网络域外道路图仍保留了道路标线类别内部的跨形态泛化。
+- 泛化检查必须区分两个维度：旧正式Base教师和轻量化P0～P8丢失了`car`开放词汇能力；Base回溯消融关闭域外纯负提示后恢复到20个，P9使用该新教师从头蒸馏后恢复到15个。P8对3张网络域外道路图仍保留了道路标线类别内部的跨形态泛化。
 - 原始SAM3支持负查询与Presence训练，但“每图再随机加入2个`person/dog/cat...`通用词作为纯负提示”来自外部`SAM3_LoRA`项目的自定义策略。严格单变量回溯已经验证：关闭这些域外纯负提示后，`car`由0恢复到20且平均IoU提高到0.7483，因此该策略是当前已确认的退化主因。完整证据与后续泛化测试见[多提示负训练专项TODO](sam3_detr_exp/docs/multi-prompt-negative-training-todo.md)。
 
 ## 环境与目录约束

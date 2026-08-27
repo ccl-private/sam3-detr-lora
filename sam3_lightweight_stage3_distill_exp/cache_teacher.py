@@ -164,6 +164,10 @@ def main() -> None:
     parser.add_argument("--log-every", type=int, default=50)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
+        "--exclude-generic-prompts", action="store_true",
+        help="教师缓存只生成数据集类别提示，不生成域外通用纯负提示",
+    )
     args = parser.parse_args()
 
     if args.device.startswith("cuda") and not torch.cuda.is_available():
@@ -184,6 +188,8 @@ def main() -> None:
         str(text).strip() for text in config.prompt_training.get("generic_negatives", [])
         if str(text).strip()
     ]
+    if args.exclude_generic_prompts:
+        generic_candidates = []
     class_names = (
         list(config.class_names.values())
         if isinstance(config.class_names, dict)
