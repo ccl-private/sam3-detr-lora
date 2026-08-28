@@ -128,6 +128,31 @@
        → P10从P9最佳点进入阶段2，以验证集逐类指标闭环控制正提示频率（已完成10轮与两套测试）
 ```
 
+### 4.0 统一训练与10图测试结果
+
+下表直接汇总EfficientViT、TinyViT P0～P10和两代Base。IoU/Recall来自同一批10张图片、阈值0.5；两项验证损失与该行接受10图测试的checkpoint和轮次严格对应，不会用另一轮的最低loss替换任务权重。10张图均来自同一无人机视频的相邻帧，因此只作为历史单场景回归结果，不能单独代表总体泛化。更完整的逐轮记录见[TinyViT实验总目录](sam3_lightweight_tinyvit_stage3_distill_exp/README.md#统一实际效果对比)。
+
+| 模型 | 对应实验目录 | `val/supervised` | `val/loss` | 白实线IoU | 白实线Recall | 白虚线IoU | 白虚线Recall | 平均IoU |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| EfficientViT Stage-3 LoRA | [Stage-3直接LoRA](sam3_lightweight_stage3_exp/README.md) | 7.1777¹ | 7.1777 | 0.3905 | 0.5137 | 0.2153 | 0.2403 | 0.3029 |
+| TinyViT P0 | [TinyViT总目录](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 6.2367 | 10.0117 | 0.5187 | 0.6676 | 0.3400 | 0.4139 | 0.4293 |
+| TinyViT P1图像特征KD | [P1](sam3_lightweight_tinyvit_stage3_distill_exp/p1_image_feature/README.md) | 6.1320 | 10.2271 | 0.5343 | 0.6863 | 0.3490 | 0.4279 | 0.4417 |
+| TinyViT P2 Stage 1/2/3 | [P2](sam3_lightweight_tinyvit_stage3_distill_exp/p2_image_stage123/README.md) | 6.0514 | 10.1169 | 0.5454 | 0.7145 | 0.3652 | 0.4461 | 0.4553 |
+| TinyViT P3全LoRA r16 | [P3](sam3_lightweight_tinyvit_stage3_distill_exp/p3_all_r16/README.md) | 5.9835 | 10.0335 | 0.5487 | 0.7228 | 0.3639 | 0.4452 | 0.4563 |
+| P4 Control任务最佳（epoch 0） | [P4](sam3_lightweight_tinyvit_stage3_distill_exp/p4_unfreeze_stage3_neck/README.md) | 6.1161 | 10.1932 | 0.5411 | 0.7200 | 0.3680 | 0.4550 | 0.4546 |
+| P4解冻任务最佳（epoch 1） | [P4](sam3_lightweight_tinyvit_stage3_distill_exp/p4_unfreeze_stage3_neck/README.md) | 5.9318 | 9.9673 | 0.5180 | 0.6801 | 0.3664 | 0.4652 | 0.4422 |
+| P5 Stage 2 DSConv（epoch 15） | [P5](sam3_lightweight_tinyvit_stage3_distill_exp/p5_dsconv_thin_line/README.md) | 5.5815 | 9.5198 | 0.5746 | 0.7308 | 0.4967 | 0.5957 | 0.5357 |
+| P6 Stage 1+2 DSConv（epoch 8） | [P6](sam3_lightweight_tinyvit_stage3_distill_exp/p6_multiscale_dsconv/README.md) | 5.4088 | 9.3122 | 0.6214 | 0.7486 | 0.5610 | 0.6524 | 0.5912 |
+| P7高/中分辨率FPN（epoch 9） | [P7](sam3_lightweight_tinyvit_stage3_distill_exp/p7_highres_fpn/README.md) | 5.3814 | 9.2771 | 0.6319 | 0.7603 | 0.5687 | 0.6604 | 0.6003 |
+| P8输入侧细线分支（epoch 4） | [P8](sam3_lightweight_tinyvit_stage3_distill_exp/p8_input_line_branch/README.md) | 5.2508 | 9.1322 | 0.6772 | 0.7900 | 0.5960 | 0.6883 | 0.6366 |
+| P9新教师从头蒸馏（epoch 19） | [P9](sam3_lightweight_tinyvit_stage3_distill_exp/p9_fresh_p8_new_teacher/README.md) | 4.8604 | 8.5787 | 0.6284 | 0.6869 | 0.6595 | 0.7543 | 0.6439 |
+| P10提示控制（epoch 4，验证最佳） | [P10](sam3_lightweight_tinyvit_stage3_distill_exp/p10_adaptive_prompt_control/README.md) | 4.8032 | 8.5076 | 0.5766 | 0.6242 | 0.6649 | 0.7601 | 0.6207 |
+| P10提示控制（epoch 9，最终） | [P10](sam3_lightweight_tinyvit_stage3_distill_exp/p10_adaptive_prompt_control/README.md) | 4.8047 | 8.5136 | 0.5972 | 0.6502 | 0.6666 | 0.7607 | 0.6319 |
+| Base + DETR LoRA（epoch 4） | [Base DETR](sam3_detr_exp/README.md) | 4.3160¹ | 4.3160 | 0.7235 | 0.7883 | 0.6808 | 0.8226 | 0.7021 |
+| 新Base教师（epoch 13，无域外负提示） | [Base回溯消融](sam3_detr_exp/negative_prompt_ablation/README.md) | 4.1741¹ | 4.1741 | 0.7520 | 0.8608 | 0.7445 | 0.8423 | 0.7483 |
+
+¹ EfficientViT直接LoRA和两代Base不含蒸馏KD，历史日志没有另写`val/supervised`字段，因此以纯监督`val/loss`作为等价监督损失。P0～P10的`val/supervised`均为训练代码直接记录。不同阶段的KD组成和历史验证batch聚合口径并不完全相同，不能按`val/loss`绝对值对所有行直接排名；优先比较同损失配置的相邻实验，并结合监督损失和实际IoU判断。P10相对P9的两项验证损失小幅下降，但旧10图IoU没有超过P9，说明训练域损失、单视频10图和域外跨形态覆盖并不等价。
+
 ### 4.1 P0：最终输出KD与图像LoRA
 
 - 位置：[实验根目录](sam3_lightweight_tinyvit_stage3_distill_exp/README.md)
