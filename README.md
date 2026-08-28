@@ -109,7 +109,7 @@
 
 ## 4. TinyViT Stage-3连续蒸馏主线
 
-总目录：[sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md)
+总目录：[sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md)。P0～P10、EfficientViT和两代Base的统一10图IoU，以及各测试权重对应的`val/supervised`与`val/loss`，集中列在该总目录的“统一实际效果对比”表中。
 
 这一阶段包含两段有明确分叉点的连续实验。P0～P3逐步扩大蒸馏和LoRA；P4从P2做严格解冻对照。P4无效后，P5同样回到P2，转而验证细线专用视觉结构；P6～P8再从各自上一阶段实际IoU最佳权重继续：
 
