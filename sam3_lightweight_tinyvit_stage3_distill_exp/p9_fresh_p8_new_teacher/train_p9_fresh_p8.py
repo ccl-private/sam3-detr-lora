@@ -9,6 +9,7 @@ from pathlib import Path
 
 import lightning as L
 import torch
+from lightning.pytorch.callbacks import EarlyStopping
 
 P9_DIR = Path(__file__).resolve().parent
 EXP_DIR = P9_DIR.parent
@@ -46,7 +47,7 @@ class P9FreshP8Module(P1ImageFeatureDistillModule):
         p5_branch_channels: int = 128, p6_branch_channels: int = 64,
         kernel_size: int = 9, offset_scale: float = 1.0,
         p8_operator: str = "dsconv", p8_stem_channels: int = 16,
-        p8_line_channels: int = 16, **kwargs,
+        p8_line_channels: int = 16, resume_weights: Path | None = None, **kwargs,
     ) -> None:
         super().__init__(*args, student_lora=None, **kwargs)
         self.hparams.branch_lr = branch_lr
@@ -65,6 +66,33 @@ class P9FreshP8Module(P1ImageFeatureDistillModule):
             p8_stem_channels=p8_stem_channels,
             p8_line_channels=p8_line_channels,
         )
+        if resume_weights is not None:
+            payload = torch.load(resume_weights, map_location="cpu", weights_only=False)
+            if not isinstance(payload, dict) or "state_dict" not in payload:
+                raise ValueError(f"P9续训权重格式错误：{resume_weights}")
+            missing, unexpected = self.detector.load_state_dict(
+                payload["state_dict"], strict=False
+            )
+            trained_prefixes = (
+                "dot_prod_scoring.", "segmentation_head.", *BRANCH_PREFIXES,
+            )
+            missing = [
+                key for key in missing
+                if "parametrizations" in key or key.startswith(trained_prefixes)
+            ]
+            unexpected = [
+                key for key in unexpected
+                if "parametrizations" in key or key.startswith(trained_prefixes)
+            ]
+            if missing or unexpected:
+                raise RuntimeError(
+                    f"P9续训权重不匹配：missing={missing}, unexpected={unexpected}"
+                )
+            self.student_source_meta = {
+                **payload.get("meta", {}),
+                "continuation_source": str(Path(resume_weights)),
+            }
+            print(f"已加载P9续训起点：{resume_weights}", flush=True)
         self._set_trainable_modes()
         self._gradient_reports = 0
 
@@ -200,9 +228,37 @@ class P9FreshP8Module(P1ImageFeatureDistillModule):
             "p8_kernel_size": int(self.hparams.kernel_size),
             "p8_offset_scale": float(self.hparams.offset_scale),
             "p9_fresh_student": True,
+            "continuation_source": self.student_source_meta.get("continuation_source"),
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save({"meta": meta, "state_dict": state}, path)
+
+
+class SaveBestMetric(L.Callback):
+    """按指定验证指标保存续训最佳权重。"""
+
+    def __init__(self, path: Path, monitor: str) -> None:
+        self.path = Path(path)
+        self.monitor = monitor
+        self.best = float("inf")
+
+    def on_validation_epoch_end(self, trainer, pl_module) -> None:
+        if trainer.sanity_checking:
+            return
+        value = trainer.callback_metrics.get(self.monitor)
+        if value is None or not torch.isfinite(value):
+            return
+        current = float(value.detach().cpu())
+        if current >= self.best:
+            return
+        self.best = current
+        if trainer.is_global_zero:
+            pl_module.save_lora_checkpoint(self.path)
+            print(
+                f"已保存P9续训最佳权重：{self.path} "
+                f"{self.monitor}={self.best:.6f}",
+                flush=True,
+            )
 
 
 def main() -> None:
@@ -223,6 +279,10 @@ def main() -> None:
     parser.add_argument("--p8-line-channels", type=int, default=16)
     parser.add_argument("--log-name", default="p9_fresh_p8_new_teacher")
     parser.add_argument("--save-every-epoch", action="store_true")
+    parser.add_argument("--resume-weights", type=Path)
+    parser.add_argument("--early-stop-patience", type=int, default=0)
+    parser.add_argument("--early-stop-min-delta", type=float, default=0.005)
+    parser.add_argument("--early-stop-monitor", default="val/supervised")
     parser.set_defaults(
         data_yaml=P9_DIR / "configs/roadline_no_generic_negatives.yaml",
         cache_root=P9_DIR / "cache/new_teacher_outputs",
@@ -267,6 +327,7 @@ def main() -> None:
         p8_operator=args.p8_operator,
         p8_stem_channels=args.p8_stem_channels,
         p8_line_channels=args.p8_line_channels,
+        resume_weights=args.resume_weights,
     )
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(
@@ -274,7 +335,21 @@ def main() -> None:
         f"总参数={sum(p.numel() for p in model.parameters()):,}，"
         f"可训练参数={trainable:,}", flush=True,
     )
-    callbacks = [p0.SaveBest(args.best_save or p0.default_best_path(args.save))]
+    best_path = args.best_save or p0.default_best_path(args.save)
+    if args.early_stop_patience > 0:
+        callbacks = [
+            SaveBestMetric(best_path, monitor=args.early_stop_monitor),
+            EarlyStopping(
+                monitor=args.early_stop_monitor,
+                mode="min",
+                min_delta=args.early_stop_min_delta,
+                patience=args.early_stop_patience,
+                check_finite=True,
+                verbose=True,
+            ),
+        ]
+    else:
+        callbacks = [p0.SaveBest(best_path)]
     if args.save_every_epoch:
         callbacks.append(p0.SaveEveryEpoch(args.save))
     trainer = L.Trainer(

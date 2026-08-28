@@ -89,6 +89,26 @@ P9相对P8平均IoU提高0.0074，收益主要来自白虚线IoU提高0.0635；�
 因此从官方TinyViT和新教师重新蒸馏有效但增益很小，没有达到0.68验收线；相对新Base教师仍差
 0.1043。评测结果位于`../tests/output/p9_fresh_p8_best_first10_threshold_05/`，该目录不提交Git。
 
+这10张图全部来自同一无人机视频`DJI_20251231162942_0002_V`的相邻帧，并不是10个独立场景。
+其中白实线268个实例、白虚线618个实例，实例数偏白虚线2.31倍；真值像素却偏白实线3.61倍。
+因此上述结果保留为历史单视频回归口径，不能单独代表P9的跨场景泛化或决定最终部署权重。
+
+### 3张网络图与非最佳checkpoint检查
+
+使用城市多车道、低分辨率斜视和乡村弯道3张无训练关系的网络图片，以0.5阈值检查P9验证
+最佳epoch 19和预先选定的中期epoch 9。图片没有人工真值，只能观察候选覆盖，不能计算IoU：
+
+| 模型 | 白实线候选 | 白虚线候选 | 观察 |
+|---|---:|---:|---|
+| P8 epoch 4 | 10 | 41 | 覆盖最宽，但存在实线/虚线提示重叠响应 |
+| P9 epoch 19最佳 | 8 | 26 | 城市图白实线完全消失，整体更保守 |
+| P9 epoch 9中期 | 9 | 28 | 比epoch 19略多，仍未恢复城市图白实线 |
+
+P9 epoch 9的验证loss为8.7623，明显高于epoch 19的8.5787，但域外候选略多，说明最低验证loss
+不等于最强域外召回。中期checkpoint仍没有逆转P8在这3图上的覆盖优势，因此差异不只是最终
+一轮的随机波动，更可能是P9持续贴近训练域和教师后变得保守。完整跨形态排序及P10恢复城市
+白实线的后续结果见`../p10_adaptive_prompt_control/README.md`。
+
 ### `car`开放类别泛化
 
 使用同一批10张道路图、提示`car`和阈值0.5测试P9最佳权重，每张图检测数依次为
@@ -105,3 +125,25 @@ P9相对P8平均IoU提高0.0074，收益主要来自白虚线IoU提高0.0635；�
 - `car`已确认保留；`person`和`dog`仍待测试。
 - 10图中`zebra crossing`产生8个无真值候选，P8为11个；候选数没有增加，但无该类真值，
   不能据此计算准确率。
+
+## 从epoch 19继续训练
+
+P9原20轮结束时`val/supervised`仍在缓慢下降，因此增加独立续训入口。续训只使用正式验证集的
+`val/supervised`进行早停，不使用固定10图测试集选模型：
+
+```bash
+bash sam3_lightweight_tinyvit_stage3_distill_exp/p9_fresh_p8_new_teacher/scripts/continue_p9_with_patience.sh
+```
+
+续训设置：
+
+- 起点：`weights/p9_fresh_p8_new_teacher.best.pt`，即原训练epoch 19；
+- 最多追加20轮，四卡、每卡batch 4；
+- 所有学习率降为原训练的1/5，KD不重新执行多轮warmup；
+- 监控`val/supervised`，`min_delta=0.005`、`patience=5`；
+- 连续5轮未获得至少0.005的改善时自动停止；
+- 最佳权重：`weights/p9_continue_from_epoch19.best.pt`；
+- 每轮权重：`weights/p9_continue_from_epoch19.epochN.pt`，其中续训epoch从0重新编号；
+- 日志：`logs/p9_continue_from_epoch19/`。
+
+固定10图测试集只在续训结束、最佳权重确定后测试一次，不参与早停或选模。
