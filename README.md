@@ -109,7 +109,7 @@
 
 ## 4. TinyViT Stage-3连续蒸馏主线
 
-总目录：[sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md)。P0～P10、EfficientViT和两代Base的统一10图IoU，以及各测试权重对应的`val/supervised`与`val/loss`，集中列在该总目录的“统一实际效果对比”表中。
+总目录：[sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md)。P0～P11、EfficientViT和两代Base的统一10图IoU，以及各测试权重对应的`val/supervised`与`val/loss`，集中列在该总目录的“统一实际效果对比”表中。
 
 这一阶段包含两段有明确分叉点的连续实验。P0～P3逐步扩大蒸馏和LoRA；P4从P2做严格解冻对照。P4无效后，P5同样回到P2，转而验证细线专用视觉结构；P6～P8再从各自上一阶段实际IoU最佳权重继续：
 
@@ -126,11 +126,12 @@
        → P8从P7任务最佳增加输入侧504分辨率细线分支（完成5轮，epoch 4任务最佳）
   → P9回到官方TinyViT起点，一次挂载P8完整结构并改用无域外负提示的新Base教师（完成20轮）
        → P10从P9最佳点进入阶段2，以验证集逐类指标闭环控制正提示频率（已完成10轮与两套测试）
+  → P11回到官方TinyViT起点，物理删除P7高分支，按P9配置重新蒸馏（完成；实际Recall下降，精简失败）
 ```
 
 ### 4.0 统一训练与10图测试结果
 
-下表直接汇总EfficientViT、TinyViT P0～P10和两代Base。IoU/Recall来自同一批10张图片、阈值0.5；两项验证损失与该行接受10图测试的checkpoint和轮次严格对应，不会用另一轮的最低loss替换任务权重。10张图均来自同一无人机视频的相邻帧，因此只作为历史单场景回归结果，不能单独代表总体泛化。更完整的逐轮记录见[TinyViT实验总目录](sam3_lightweight_tinyvit_stage3_distill_exp/README.md#统一实际效果对比)。
+下表直接汇总EfficientViT、TinyViT P0～P11和两代Base。IoU/Recall来自同一批10张图片、阈值0.5；两项验证损失与该行接受10图测试的checkpoint和轮次严格对应，不会用另一轮的最低loss替换任务权重。10张图均来自同一无人机视频的相邻帧，因此只作为历史单场景回归结果，不能单独代表总体泛化。更完整的逐轮记录见[TinyViT实验总目录](sam3_lightweight_tinyvit_stage3_distill_exp/README.md#统一实际效果对比)。
 
 | 模型 | 对应实验目录 | `val/supervised` | `val/loss` | 白实线IoU | 白实线Recall | 白虚线IoU | 白虚线Recall | 平均IoU |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
@@ -148,10 +149,11 @@
 | P9新教师从头蒸馏（epoch 19） | [P9](sam3_lightweight_tinyvit_stage3_distill_exp/p9_fresh_p8_new_teacher/README.md) | 4.8604 | 8.5787 | 0.6284 | 0.6869 | 0.6595 | 0.7543 | 0.6439 |
 | P10提示控制（epoch 4，验证最佳） | [P10](sam3_lightweight_tinyvit_stage3_distill_exp/p10_adaptive_prompt_control/README.md) | 4.8032 | 8.5076 | 0.5766 | 0.6242 | 0.6649 | 0.7601 | 0.6207 |
 | P10提示控制（epoch 9，最终） | [P10](sam3_lightweight_tinyvit_stage3_distill_exp/p10_adaptive_prompt_control/README.md) | 4.8047 | 8.5136 | 0.5972 | 0.6502 | 0.6666 | 0.7607 | 0.6319 |
+| P11删除P7高分支（epoch 19） | [P11](sam3_lightweight_tinyvit_stage3_distill_exp/p11_pruned_p7_new_teacher/README.md) | 4.8085 | 8.5021 | 0.5959 | 0.6494 | 0.6182 | 0.7055 | 0.6071 |
 | Base + DETR LoRA（epoch 4） | [Base DETR](sam3_detr_exp/README.md) | 4.3160¹ | 4.3160 | 0.7235 | 0.7883 | 0.6808 | 0.8226 | 0.7021 |
 | 新Base教师（epoch 13，无域外负提示） | [Base回溯消融](sam3_detr_exp/negative_prompt_ablation/README.md) | 4.1741¹ | 4.1741 | 0.7520 | 0.8608 | 0.7445 | 0.8423 | 0.7483 |
 
-¹ EfficientViT直接LoRA和两代Base不含蒸馏KD，历史日志没有另写`val/supervised`字段，因此以纯监督`val/loss`作为等价监督损失。P0～P10的`val/supervised`均为训练代码直接记录。不同阶段的KD组成和历史验证batch聚合口径并不完全相同，不能按`val/loss`绝对值对所有行直接排名；优先比较同损失配置的相邻实验，并结合监督损失和实际IoU判断。P10相对P9的两项验证损失小幅下降，但旧10图IoU没有超过P9，说明训练域损失、单视频10图和域外跨形态覆盖并不等价。
+¹ EfficientViT直接LoRA和两代Base不含蒸馏KD，历史日志没有另写`val/supervised`字段，因此以纯监督`val/loss`作为等价监督损失。P0～P11的`val/supervised`均为训练代码直接记录。不同阶段的KD组成和历史验证batch聚合口径并不完全相同，不能按`val/loss`绝对值对所有行直接排名；优先比较同损失配置的相邻实验，并结合监督损失和实际IoU判断。P10相对P9的两项验证损失小幅下降，但旧10图IoU没有超过P9；P11的两项验证损失也低于P9，平均IoU和Recall却明显下降，说明训练域损失、单视频10图和域外跨形态覆盖并不等价。
 
 ### 4.1 P0：最终输出KD与图像LoRA
 
@@ -303,6 +305,16 @@ SAM3原生loss和验证数据保持该项目实现不变，只把验证提示改
 - 域外3图：epoch 9检出白实线13个、白虚线29个，恢复了P9在城市多车道图中消失的白实线；网络图无真值，只能用于观察跨形态覆盖。
 - 结论：提示控制优于普通续训但未超过原始P9；验证集、旧10图和域外图的排序不一致，不能再用单一指标决定总体最佳。
 
+## 8. P11：删除P7高分支并使用新Base教师从头蒸馏
+
+- 位置：[p11_pruned_p7_new_teacher](sam3_lightweight_tinyvit_stage3_distill_exp/p11_pruned_p7_new_teacher/README.md)
+- 起点：作者官方TinyViT Stage-3，不继承P9或P10学生权重。
+- 单一结构变量：物理删除P7的Stage 1方向特征到`288×288` FPN高分支；保留P5、P6、P7中分辨率分支和P8。
+- 教师与训练：复用P9的新Base教师输出缓存，继续关闭域外纯负提示；损失、LoRA覆盖、学习率、batch和20轮训练计划均与P9一致。
+- 删除依据：该高分支在P8、P9和P10 epoch 9中的门控绝对值分别为0.0171、0.0174和0.0176，连续三次训练均接近0；P7中分辨率门控则达到1.376。
+- 正式结果：四卡20轮完成，epoch 19的`val/supervised=4.8085`、`val/loss=8.5021`，均低于P9；但固定10图平均IoU只有0.6071，比P9下降0.0369，白虚线Recall下降0.0488。
+- 结论：未通过预设精简门槛。只减少33,281个参数却明显损害Recall，不能根据门控接近0直接删除该路径；P11保留为失败消融，不作为后续学生起点。
+
 ## 统一结果对比
 
 统一结果使用相同10张道路图片、相同文本提示和置信度阈值0.5。测试集只有白实线和白虚线真值，其他类别只能观察误检。该集合全部来自同一无人机视频的相邻帧，继续用于保持历史可比，但不再视为总体泛化测试集。
@@ -325,6 +337,7 @@ SAM3原生loss和验证数据保持该项目实现不变，只把验证提示改
 | TinyViT P9（epoch 19，新教师从头蒸馏） | [p9_fresh_p8_new_teacher](sam3_lightweight_tinyvit_stage3_distill_exp/p9_fresh_p8_new_teacher/README.md) | 0.6284 | 0.6869 | 0.6595 | 0.7543 | 0.6439 |
 | TinyViT P10（epoch 4，验证最佳） | [p10_adaptive_prompt_control](sam3_lightweight_tinyvit_stage3_distill_exp/p10_adaptive_prompt_control/README.md) | 0.5766 | 0.6242 | 0.6649 | 0.7601 | 0.6207 |
 | TinyViT P10（epoch 9，最终） | [p10_adaptive_prompt_control](sam3_lightweight_tinyvit_stage3_distill_exp/p10_adaptive_prompt_control/README.md) | 0.5972 | 0.6502 | 0.6666 | 0.7607 | 0.6319 |
+| TinyViT P11（epoch 19，删除P7高分支） | [p11_pruned_p7_new_teacher](sam3_lightweight_tinyvit_stage3_distill_exp/p11_pruned_p7_new_teacher/README.md) | 0.5959 | 0.6494 | 0.6182 | 0.7055 | 0.6071 |
 
 早期TinyViT-S和EfficientViT P0蒸馏没有可复核的统一IoU/Recall，因此不放入数值排名。不同阶段的loss组成不同，跨实验应比较上表的实际IoU和Recall，不能直接比较`val/loss`。
 
@@ -335,7 +348,7 @@ SAM3原生loss和验证数据保持该项目实现不变，只把验证提示改
 实例数偏白虚线2.31倍；真值像素却分别为2,108,174和584,226，面积偏白实线3.61倍。该集合
 同时具有“虚线实例多、实线单体面积大、时序画面高度重复”的偏置。
 
-因此它只保留为“旧航拍单场景回归集”，用于和历史P0～P10保持数值可比；不能单独代表跨场景、
+因此它只保留为“旧航拍单场景回归集”，用于和历史P0～P11保持数值可比；不能单独代表跨场景、
 跨视角和跨形态泛化，也不能单独决定最终部署模型。后续正式测试集应按视频片段去重，每段最多
 抽1～2帧，并覆盖城市/乡村、直道/弯道、航拍/低视角、远近尺度和不同光照；指标同时报告分类别
 micro IoU、逐图片macro IoU和Recall。
@@ -407,7 +420,7 @@ P10在旧10图平均IoU仍低于P9，却在3张域外图恢复了P9消失的城�
 | [sam3_lightweight_exp](sam3_lightweight_exp/README.md) | 第1步：早期轻量化可行性验证 |
 | [sam3_lightweight_stage3_exp](sam3_lightweight_stage3_exp/README.md) | 第2步：EfficientViT Stage-3直接LoRA基线 |
 | [sam3_lightweight_stage3_distill_exp](sam3_lightweight_stage3_distill_exp/README.md) | 第3步：EfficientViT最终输出蒸馏 |
-| [sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 第4、6、7步：TinyViT P0～P8结构实验、P9新教师从头蒸馏，以及P10验证闭环提示控制 |
+| [sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 第4、6、7、8步：TinyViT P0～P8结构实验、P9新教师从头蒸馏、P10验证闭环提示控制，以及P11删除P7高分支消融 |
 
 ## 当前结论与下一步
 
@@ -424,6 +437,7 @@ P10在旧10图平均IoU仍低于P9，却在3张域外图恢复了P9消失的城�
 - P8进一步从输入侧504分辨率先提取细线再下采样，5轮任务指标单调提升；epoch 4平均IoU达到0.6366，比P7提高0.0363，确认为正式任务最佳权重。
 - P9从官方TinyViT与P8完整结构重新开始，改用无域外负提示的新Base教师完整蒸馏20轮；平均IoU为0.6439，只比P8提高0.0074，主要收益集中在白虚线，尚未缩小到接近Base的程度。
 - P9普通低学习率续训虽然继续降低验证loss，但白实线退化、平均IoU下降，说明总loss与类别任务表现已经背离。P10完整训练10轮后把虚实训练实例比由3.75:1降至约2.17:1；最终epoch 9旧10图平均IoU为0.6319，高于普通续训0.6256但低于原始P9的0.6439。P10在3张域外图恢复了P9消失的城市白实线，说明提示控制有一定跨形态收益，但当前选模口径不足以确认总体最佳。
+- P11从官方TinyViT重新训练并只删除P7高分支。虽然epoch 19的`val/supervised=4.8085`、`val/loss=8.5021`均低于P9，但固定10图平均IoU降至0.6071，白虚线Recall下降0.0488，而参数只减少33,281。该精简不成立，后续结构继续保留P7高分支。
 - 历史固定10图全部来自同一无人机视频相邻帧，实例数偏白虚线、像素面积偏白实线，只能作为旧单场景回归集。下一阶段必须建设按视频去重的多场景测试集，不能继续用这10图或验证总loss单独选模。
 - P7最终主要采用Stage 2到`144×144`的中分辨率直连，而P8完整5轮进一步证明输入侧高分辨率特征具有价值。普通长条卷积严格对照尚未完成，因此目前只能确认高分辨率细线旁路有效，不能确认动态蛇形采样具有独立收益。
 - 泛化检查必须区分两个维度：旧正式Base教师和轻量化P0～P8丢失了`car`开放词汇能力；Base回溯消融关闭域外纯负提示后恢复到20个，P9使用该新教师从头蒸馏后恢复到15个。P8对3张网络域外道路图仍保留了道路标线类别内部的跨形态泛化。

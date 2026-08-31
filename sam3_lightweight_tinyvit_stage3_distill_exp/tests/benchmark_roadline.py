@@ -131,13 +131,29 @@ def main() -> None:
         p8_dir = EXP_DIR / "p8_input_line_branch"
         p7_dir = EXP_DIR / "p7_highres_fpn"
         p6_dir = EXP_DIR / "p6_multiscale_dsconv"
-        for path in (p8_dir, p7_dir, p6_dir):
+        p11_dir = EXP_DIR / "p11_pruned_p7_new_teacher"
+        for path in (p8_dir, p7_dir, p6_dir, p11_dir):
             if str(path) not in sys.path:
                 sys.path.insert(0, str(path))
-        from input_line_branch import attach_p8_from_checkpoint
+        if meta.get("p7_high_branch_enabled") is False:
+            from pruned_structure import attach_pruned_complete_structure
 
-        attach_p8_from_checkpoint(model, args.weights)
-        model_label = f"tinyvit_p8_input_{meta.get('p8_operator', 'dsconv')}"
+            attach_pruned_complete_structure(
+                model,
+                p5_branch_channels=int(meta.get("p5_branch_channels", 128)),
+                p6_branch_channels=int(meta.get("p6_stage1_branch_channels", 64)),
+                kernel_size=int(meta.get("p8_kernel_size", 9)),
+                offset_scale=float(meta.get("p8_offset_scale", 1.0)),
+                p8_operator=str(meta.get("p8_operator", "dsconv")),
+                p8_stem_channels=int(meta.get("p8_stem_channels", 16)),
+                p8_line_channels=int(meta.get("p8_line_channels", 16)),
+            )
+            model_label = "tinyvit_p11_pruned_p7_high"
+        else:
+            from input_line_branch import attach_p8_from_checkpoint
+
+            attach_p8_from_checkpoint(model, args.weights)
+            model_label = f"tinyvit_p8_input_{meta.get('p8_operator', 'dsconv')}"
     elif bool(meta.get("p7_highres_fpn", False)):
         p7_dir = EXP_DIR / "p7_highres_fpn"
         p6_dir = EXP_DIR / "p6_multiscale_dsconv"
