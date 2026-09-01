@@ -58,14 +58,19 @@ def negative_target(text: str, resolution: int) -> PromptTarget:
     )
 
 
-def cache_is_complete(path: Path, expected_prompt_keys: set[str], resolution: int) -> bool:
+def cache_is_complete(
+    path: Path,
+    expected_prompt_keys: set[str],
+    resolution: int,
+    format_version: int = 1,
+) -> bool:
     """只复用提示词集合完整且分辨率一致的教师缓存。"""
     if not path.exists():
         return False
     try:
         payload = torch.load(path, map_location="cpu", weights_only=False)
         return (
-            payload.get("format_version") == 1
+            payload.get("format_version") == format_version
             and payload.get("resolution") == resolution
             and set(payload.get("prompts", {})) == expected_prompt_keys
         )
@@ -87,7 +92,13 @@ def native_mask_iou(pred_logits: torch.Tensor, target_masks: torch.Tensor) -> to
     return intersection / union
 
 
-def build_prompt_cache(outputs: dict, targets: dict, matcher, prompt_targets) -> list[dict]:
+def build_prompt_cache(
+    outputs: dict,
+    targets: dict,
+    matcher,
+    prompt_targets,
+    include_dense_queries: bool = False,
+) -> list[dict]:
     batch_idx, src_idx, tgt_idx = matcher(
         outputs,
         targets,
@@ -112,6 +123,17 @@ def build_prompt_cache(outputs: dict, targets: dict, matcher, prompt_targets) ->
             "num_targets": count,
             "instances": [None] * count,
         }
+        if include_dense_queries:
+            # P12使用全部DETR候选的logit和框做集合蒸馏。mask不缓存：
+            # 全部Q张高分辨率mask会使缓存体积不可接受，且低置信候选不应参与mask KD。
+            entry["dense_queries"] = {
+                "logits": outputs["pred_logits"][prompt_index].detach().to(
+                    dtype=torch.float16
+                ).cpu(),
+                "boxes": outputs["pred_boxes"][prompt_index].detach().to(
+                    dtype=torch.float16
+                ).cpu(),
+            }
         selected = (batch_idx == prompt_index).nonzero().flatten()
         for position in selected.tolist():
             query_index = int(src_idx[position])
@@ -165,6 +187,10 @@ def main() -> None:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument(
+        "--include-dense-queries", action="store_true",
+        help="缓存每个提示的全部DETR query logit和框，供P12候选集合蒸馏使用",
+    )
+    parser.add_argument(
         "--exclude-generic-prompts", action="store_true",
         help="教师缓存只生成数据集类别提示，不生成域外通用纯负提示",
     )
@@ -199,6 +225,7 @@ def main() -> None:
         prompt_key(text) for text in [*class_names, *generic_candidates]
     }
 
+    format_version = 2 if args.include_dense_queries else 1
     split_dirs = {"train": config.train_dir, "val": config.val_dir}
     for split in args.splits:
         split_dir = split_dirs.get(split)
@@ -221,7 +248,7 @@ def main() -> None:
             image_path = dataset.records[index][0]
             path = cache_file(args.cache_root, split, image_path)
             if args.overwrite or not cache_is_complete(
-                path, expected_prompt_keys, args.resolution
+                path, expected_prompt_keys, args.resolution, format_version
             ):
                 pending_indices.append(index)
         loader = DataLoader(
@@ -281,7 +308,10 @@ def main() -> None:
                             geometric_prompt=geometric_prompt,
                         )
                     targets = build_targets(chunk, torch.device(args.device))
-                    entries = build_prompt_cache(outputs, targets, matcher, chunk)
+                    entries = build_prompt_cache(
+                        outputs, targets, matcher, chunk,
+                        include_dense_queries=args.include_dense_queries,
+                    )
                     for target, group_id, entry in zip(chunk, chunk_group_ids, entries):
                         group_prompts[group_id][prompt_key(target.text_prompt)] = entry
             for sample, prompts in zip(samples, group_prompts):
@@ -289,12 +319,13 @@ def main() -> None:
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 torch.save(
                     {
-                        "format_version": 1,
+                        "format_version": format_version,
                         "image_path": str(sample.image_path.expanduser().resolve()),
                         "split": split,
                         "resolution": args.resolution,
                         "teacher_lora": str(args.teacher_lora.resolve()),
                         "teacher_meta": meta,
+                        "dense_queries": bool(args.include_dense_queries),
                         "prompts": prompts,
                     },
                     output_path,

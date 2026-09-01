@@ -46,6 +46,7 @@ sam3_lightweight_tinyvit_stage3_distill_exp/
 ├── p9_fresh_p8_new_teacher/           # P9：官方TinyViT + P8完整结构 + 新教师从头蒸馏
 ├── p10_adaptive_prompt_control/       # P10：验证闭环控制正提示频率
 ├── p11_pruned_p7_new_teacher/         # P11：删除P7高分支并按P9配置从头蒸馏
+├── p12_query_set_distill/             # P12：全部候选集合与跨提示软关系蒸馏
 ├── tests/                            # 统一评测代码
 │   └── output/                       # 测试结果，不提交Git
 ├── cache/                            # 教师缓存，不提交Git
@@ -232,10 +233,11 @@ P3先把P2最佳权重中的图像r8和DETR r8 LoRA增量分别合并进对应�
 | P10提示控制（epoch 4，验证最佳） | `p10_adaptive_prompt_control/` | 4.8032 | 8.5076 | 0.5766 | 0.6242 | 0.6649 | 0.7601 | 0.6207 |
 | P10提示控制（epoch 9，最终） | `p10_adaptive_prompt_control/` | 4.8047 | 8.5136 | 0.5972 | 0.6502 | 0.6666 | 0.7607 | 0.6319 |
 | P11删除P7高分支（epoch 19） | `p11_pruned_p7_new_teacher/` | 4.8085 | 8.5021 | 0.5959 | 0.6494 | 0.6182 | 0.7055 | 0.6071 |
+| P12候选集合与跨提示关系KD（epoch 19） | `p12_query_set_distill/` | 4.8458 | 9.4029 | 0.6574 | 0.7187 | 0.6765 | 0.7755 | 0.6670 |
 | Base + DETR LoRA（epoch 4） | `../sam3_detr_exp/` | 4.3160¹ | 4.3160 | 0.7235 | 0.7883 | 0.6808 | 0.8226 | 0.7021 |
 | 新Base教师（epoch 13；即Base回溯消融：无域外负提示） | `../sam3_detr_exp/negative_prompt_ablation/` | 4.1741¹ | 4.1741 | 0.7520 | 0.8608 | 0.7445 | 0.8423 | 0.7483 |
 
-¹ 这三组不含蒸馏KD，历史日志没有另写`val/supervised`字段；表中以纯监督`val/loss`作为等价监督损失。P0～P11的`val/supervised`是训练代码直接记录的字段。由于各阶段加入的KD项和历史验证batch聚合口径并不完全相同，`val/loss`绝对值不能跨所有行直接排名；它主要用于同损失配置的相邻实验比较。P10相对P9的验证损失小幅下降但旧10图IoU没有超过P9；P11相对P9的验证损失同样下降，固定10图平均IoU和Recall却明显退化。这再次说明完整验证集训练目标、单视频10图和域外跨形态覆盖不是同一个指标。
+¹ 这三组不含蒸馏KD，历史日志没有另写`val/supervised`字段；表中以纯监督`val/loss`作为等价监督损失。P0～P12的`val/supervised`是训练代码直接记录的字段。由于各阶段加入的KD项和历史验证batch聚合口径并不完全相同，`val/loss`绝对值不能跨所有行直接排名；它主要用于同损失配置的相邻实验比较。P12还新增候选集合KD与跨提示关系KD，因此其总loss尤其不能直接和P9比较。P10相对P9的验证损失小幅下降但旧10图IoU没有超过P9；P11相对P9的验证损失同样下降，固定10图平均IoU和Recall却明显退化。这再次说明完整验证集训练目标、单视频10图和域外跨形态覆盖不是同一个指标。
 
 P0到P1的实际变化：
 
@@ -273,6 +275,7 @@ P2之后的结构实验目前把两类平均IoU从0.4553提高到P8 epoch 4的0.
 | P9 | 官方TinyViT + P8完整结构 | 20轮，最佳epoch 19 | 0.6284 | 0.6595 | 0.6439 | 新教师从头蒸馏小幅超过P8，主要改善白虚线，`car`泛化恢复 |
 | P10 | P9 epoch 19 | 10轮，验证最佳epoch 4；最终epoch 9 | 0.5972 | 0.6666 | 0.6319 | 最终轮优于普通续训但未超过P9；3张域外图恢复城市白实线 |
 | P11 | 官方TinyViT + 删除P7高分支后的P8其余结构 | 20轮，最佳epoch 19 | 0.5959 | 0.6182 | 0.6071 | 验证loss低于P9，但平均IoU下降0.0369、虚线Recall下降0.0488，精简失败 |
+| P12 | 官方TinyViT + P8完整结构 | 20轮，最佳epoch 19 | 0.6574 | 0.6765 | 0.6670 | 全部候选集合与跨提示关系KD带来固定10图新高，但城市网络图白实线未恢复 |
 | Base + DETR LoRA | Base权重 | 10轮内提前停止 | 0.7235 | 0.6808 | 0.7021 | 当前教师与效果上限 |
 | 新Base教师（Base回溯消融无域外负提示模型） | 原始Base重新训练 | 20轮，最佳epoch 13 | 0.7520 | 0.7445 | 0.7483 | P9实际使用的教师与当前效果上限 |
 
@@ -378,6 +381,14 @@ DETR LoRA、学习率、每卡batch 4和20轮计划均与P9一致；教师输出
 IoU/Recall只有0.5959/0.6494，白虚线为0.6182/0.7055，平均IoU 0.6071，比P9下降0.0369。
 该实验未通过精简门槛，说明接近0的标量门控不足以证明路径无用；P7高分支继续保留。
 
+### P12：全部候选集合与跨提示软关系蒸馏
+
+对应目录：`p12_query_set_distill/`
+
+P12以P9为严格基线，从官方TinyViT Stage-3与完整P8结构重新训练，继续使用无域外纯负提示的新Base教师。除P9已有的GT匹配输出KD、Presence KD和三尺度图像特征KD外，P12缓存每个提示的全部200个教师候选：高分top 50按空间Hungarian匹配蒸馏logit和框，全部候选按排序后的置信度分布蒸馏；同时以真值实例为锚点蒸馏7个道路标线提示之间的软关系。
+
+四卡20轮完成，epoch 19最佳，`val/supervised=4.8458`、`val/kd=4.5571`、`val/loss=9.4029`。固定10图白实线IoU/Recall为0.6574/0.7187，白虚线为0.6765/0.7755，平均IoU 0.6670，比P9提高0.0231，成为当前轻量模型在该历史回归集上的最高值。3张无真值网络图共检出白实线8个、白虚线29个，但城市多车道图的白实线仍为0，说明跨形态覆盖没有同步恢复。候选集合KD与跨提示关系KD本轮同时引入，后续若要定位独立贡献，必须拆开消融。
+
 ## 常用命令
 
 P0四卡训练：
@@ -421,4 +432,11 @@ P11删除P7高分支并从头蒸馏：
 
 ```bash
 bash sam3_lightweight_tinyvit_stage3_distill_exp/p11_pruned_p7_new_teacher/scripts/train_p11_pruned_4gpu.sh
+```
+
+P12全部候选缓存与四卡训练：
+
+```bash
+bash sam3_lightweight_tinyvit_stage3_distill_exp/p12_query_set_distill/scripts/cache_dense_teacher_queries_4gpu.sh
+bash sam3_lightweight_tinyvit_stage3_distill_exp/p12_query_set_distill/scripts/train_p12_query_set_4gpu.sh
 ```
