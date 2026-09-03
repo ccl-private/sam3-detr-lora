@@ -4,6 +4,8 @@
 
 因此，本项目不是单一的轻量化实验。SAM3模块化和Base DETR LoRA微调本身就是已经完成的核心成果，轻量化与蒸馏是建立在它们之上的后续研究。五个实验目录按实际发生顺序形成如下路线：
 
+知乎系列长文草稿与真实网图效果展示：[《把SAM3道路标线能力做强、再做小：微调保泛化与轻量化蒸馏实录（上）》](docs/zhihu/SAM3道路标线微调与泛化保持.md)。本篇讲Base微调与泛化保持，文首目录已列出待更新的轻量骨干、蒸馏、细线结构和AGX部署路线。
+
 > **统一术语：**本文所称“新Base教师”，就是第5步“Base回溯消融：无域外负提示”训练得到的
 > 同一个模型，正式权重为
 > `sam3_detr_exp/negative_prompt_ablation/weights/roadline_r8_a16_lr2e4_no_generic_negatives.best.pt`。
