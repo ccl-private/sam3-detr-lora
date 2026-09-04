@@ -111,7 +111,7 @@
 
 ## 4. TinyViT Stage-3连续蒸馏主线
 
-总目录：[sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md)。P0～P12、EfficientViT和两代Base的统一10图IoU，以及各测试权重对应的`val/supervised`与`val/loss`，集中列在该总目录的“统一实际效果对比”表中。
+总目录：[sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md)。P0～P13-A的实验关系、EfficientViT和两代Base结果集中记录于该目录；其中P0～P12已有统一10图IoU及对应的`val/supervised`与`val/loss`，P13-A目前完成了验证loss和591张无标签网图对比，固定10图尚待补测。
 
 这一阶段包含两段有明确分叉点的连续实验。P0～P3逐步扩大蒸馏和LoRA；P4从P2做严格解冻对照。P4无效后，P5同样回到P2，转而验证细线专用视觉结构；P6～P8再从各自上一阶段实际IoU最佳权重继续：
 
@@ -130,6 +130,7 @@
        → P10从P9最佳点进入阶段2，以验证集逐类指标闭环控制正提示频率（已完成10轮与两套测试）
   → P11回到官方TinyViT起点，物理删除P7高分支，按P9配置重新蒸馏（完成；实际Recall下降，精简失败）
   → P12回到官方TinyViT起点与完整P8结构，新增全部候选集合和7提示软关系KD（完成；固定10图新高）
+  → P13-A回到相同起点与结构，加入331张无标签图高置信输出KD（完成；域外覆盖增强、候选校准退化）
 ```
 
 ### 4.0 统一训练与10图测试结果
@@ -330,6 +331,21 @@ SAM3原生loss和验证数据保持该项目实现不变，只把验证提示改
 - 跨形态3图：白实线/白虚线合计8/29；城市多车道白实线仍为0，未恢复P10曾观察到的覆盖。
 - 结论：候选集合与跨提示关系联合蒸馏对固定10图有效，但跨形态收益尚不充分，且两项KD同时加入，尚不能区分各自贡献。
 
+## 10. P13-A：单教师无标签高置信输出蒸馏
+
+- 位置：[p13_unlabeled_output_distill](sam3_lightweight_tinyvit_stage3_distill_exp/p13_unlabeled_output_distill/README.md)
+- 起点：与P12相同，使用官方TinyViT Stage-3和完整P8结构从头训练，不加载P12权重；P12是同条件有标签Control。
+- 新增变量：每步按图片数1:1加入331张自动筛选的无标签网图，使用同一个新Base教师蒸馏高置信mask、框、软分类和Presence；教师未检出不作为hard negative。
+- 正式训练：四卡20轮完成，epoch 16最佳，`val/supervised=4.8242`、`val/kd=4.5465`、`val/loss=9.3707`。相对P12只分别下降0.0216、0.0106和0.0322，训练域收益很小。
+- 591图对比：在100张未参与训练的保留图上，P13-A预测像素是P12的5.43倍，候选数是16.36倍；331张训练候选分别为3.96倍和13.12倍；160张教师未检出图分别为5.76倍和27.14倍。检测数包含重复Query，网图没有GT，不能把倍数当作精度或Recall。
+- 肉眼结论：雨夜、反光、磨损、航拍和远距离细线中确有一批P12漏检被恢复，说明域外激活并非纯粹虚高；但同一标线多Query、多提示重复响应，以及箭头、文字、示意图、车辆和反光误触发也明显增加，mask更粗且更易粘连。
+- 判定：P13-A实现了“召回扩张”，但没有实现“受控泛化”。当前模型不适合直接部署；下一步应先做全部候选软分布校准、重复Query抑制、无标签曝光量和数据清洗消融，再决定是否进入强弱增强。
+
+P13-A的本地四联图位于
+`sam3_lightweight_tinyvit_stage3_distill_exp/tests/output/p13a_vs_p12_unlabeled_591_threshold_05/`，
+按仓库约定属于不提交Git的测试输出。完整统计、风险和后续计划已经写入上述P13-A目录及
+[无标签单教师蒸馏TODO](sam3_lightweight_tinyvit_stage3_distill_exp/无标签单教师蒸馏TODO.md)。
+
 ## 统一结果对比
 
 统一结果使用相同10张道路图片、相同文本提示和置信度阈值0.5。测试集只有白实线和白虚线真值，其他类别只能观察误检。该集合全部来自同一无人机视频的相邻帧，继续用于保持历史可比，但不再视为总体泛化测试集。
@@ -355,7 +371,9 @@ SAM3原生loss和验证数据保持该项目实现不变，只把验证提示改
 | TinyViT P11（epoch 19，删除P7高分支） | [p11_pruned_p7_new_teacher](sam3_lightweight_tinyvit_stage3_distill_exp/p11_pruned_p7_new_teacher/README.md) | 0.5959 | 0.6494 | 0.6182 | 0.7055 | 0.6071 |
 | TinyViT P12（epoch 19，候选集合与跨提示关系KD） | [p12_query_set_distill](sam3_lightweight_tinyvit_stage3_distill_exp/p12_query_set_distill/README.md) | 0.6574 | 0.7187 | 0.6765 | 0.7755 | 0.6670 |
 
-早期TinyViT-S和EfficientViT P0蒸馏没有可复核的统一IoU/Recall，因此不放入数值排名。不同阶段的loss组成不同，跨实验应比较上表的实际IoU和Recall，不能直接比较`val/loss`。
+早期TinyViT-S和EfficientViT P0蒸馏没有可复核的统一IoU/Recall，因此不放入数值排名。P13-A
+尚未完成固定10图测试，也不提前填入该表。不同阶段的loss组成不同，跨实验应比较实际IoU和Recall，
+不能直接比较`val/loss`。
 
 ### 旧10图测试集限制
 

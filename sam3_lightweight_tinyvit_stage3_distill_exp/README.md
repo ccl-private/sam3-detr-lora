@@ -9,10 +9,15 @@
 文件组成、LoRA可合并范围、最终FP32/FP16推理体积和正式导出TODO见
 [模型体积与合并分析](模型体积与合并分析.md)。
 
+P12之后使用591张跨场景无标签道路图片开展P13-A，方案、单教师约束、数据清洗、结果和后续
+校准消融见[无标签单教师蒸馏TODO](无标签单教师蒸馏TODO.md)。该路线只使用“新Base教师”生成
+软目标；官方SAM3 Base仅作评测对照，不参与双教师蒸馏。P13-A已完成20轮训练和591图对比：
+域外道路标线覆盖确实增强，但重复Query、类别混淆和置信度失准也显著增加，尚不能直接部署。
+
 ## 固定条件
 
 - 学生基模：官方 Stage-3 TV-M，TinyViT-11M + MobileCLIP-S0。
-- 教师：P0～P8使用历史`roadline_r8_a16_lr2e4.best.pt`；P9改用“Base回溯消融：无域外负提示”
+- 教师：P0～P8使用历史`roadline_r8_a16_lr2e4.best.pt`；P9～P13-A改用“Base回溯消融：无域外负提示”
   训练得到的`roadline_r8_a16_lr2e4_no_generic_negatives.best.pt`。后文“新Base教师”均指这同一个
   回溯消融最佳模型，不是另一个独立模型。
 - 文本提示：道路标线配置中的 7 个固定类别，文本编码器冻结并实时提取特征。
@@ -30,6 +35,7 @@ TinyViT 是一个图像编码器，内部按分辨率分为 stage 0～3。它包
 sam3_lightweight_tinyvit_stage3_distill_exp/
 ├── README.md                         # 本实验总览
 ├── 模型体积与合并分析.md             # 实际权重组成、合并方式和部署体积
+├── 无标签单教师蒸馏TODO.md           # P13无标签数据、单教师缓存、消融与验收计划
 ├── train_p0_image_lora.py            # P0训练入口
 ├── image_lora.py                     # TinyViT图像LoRA注入
 ├── model_adapter.py                  # TinyViT Stage-3模型构建
@@ -47,6 +53,7 @@ sam3_lightweight_tinyvit_stage3_distill_exp/
 ├── p10_adaptive_prompt_control/       # P10：验证闭环控制正提示频率
 ├── p11_pruned_p7_new_teacher/         # P11：删除P7高分支并按P9配置从头蒸馏
 ├── p12_query_set_distill/             # P12：全部候选集合与跨提示软关系蒸馏
+├── p13_unlabeled_output_distill/       # P13-A：单教师无标签高置信输出蒸馏
 ├── tests/                            # 统一评测代码
 │   └── output/                       # 测试结果，不提交Git
 ├── cache/                            # 教师缓存，不提交Git
@@ -276,6 +283,7 @@ P2之后的结构实验目前把两类平均IoU从0.4553提高到P8 epoch 4的0.
 | P10 | P9 epoch 19 | 10轮，验证最佳epoch 4；最终epoch 9 | 0.5972 | 0.6666 | 0.6319 | 最终轮优于普通续训但未超过P9；3张域外图恢复城市白实线 |
 | P11 | 官方TinyViT + 删除P7高分支后的P8其余结构 | 20轮，最佳epoch 19 | 0.5959 | 0.6182 | 0.6071 | 验证loss低于P9，但平均IoU下降0.0369、虚线Recall下降0.0488，精简失败 |
 | P12 | 官方TinyViT + P8完整结构 | 20轮，最佳epoch 19 | 0.6574 | 0.6765 | 0.6670 | 全部候选集合与跨提示关系KD带来固定10图新高，但城市网络图白实线未恢复 |
+| P13-A | 官方TinyViT + P8完整结构 | 20轮，最佳epoch 16 | 待测 | 待测 | 待测 | 加入331张无标签高置信输出KD；验证监督loss微降，591图真实覆盖增强但校准与类别分离明显退化 |
 | Base + DETR LoRA | Base权重 | 10轮内提前停止 | 0.7235 | 0.6808 | 0.7021 | 当前教师与效果上限 |
 | 新Base教师（Base回溯消融无域外负提示模型） | 原始Base重新训练 | 20轮，最佳epoch 13 | 0.7520 | 0.7445 | 0.7483 | P9实际使用的教师与当前效果上限 |
 
@@ -389,6 +397,35 @@ P12以P9为严格基线，从官方TinyViT Stage-3与完整P8结构重新训练�
 
 四卡20轮完成，epoch 19最佳，`val/supervised=4.8458`、`val/kd=4.5571`、`val/loss=9.4029`。固定10图白实线IoU/Recall为0.6574/0.7187，白虚线为0.6765/0.7755，平均IoU 0.6670，比P9提高0.0231，成为当前轻量模型在该历史回归集上的最高值。3张无真值网络图共检出白实线8个、白虚线29个，但城市多车道图的白实线仍为0，说明跨形态覆盖没有同步恢复。候选集合KD与跨提示关系KD本轮同时引入，后续若要定位独立贡献，必须拆开消融。
 
+### P13-A：单教师无标签高置信输出蒸馏
+
+对应目录：`p13_unlabeled_output_distill/`
+
+P13-A已经完成四卡20轮正式训练。它以现有P12为正式Control，并与P12一样从
+官方TinyViT Stage-3和完整P8结构重新训练，不加载P12最佳权重。每个训练step按图片数1:1混合
+有标签P12 batch和无标签batch；四卡正式配置为全局16张有标签加16张无标签。
+
+无标签侧只使用同一个新Base教师：缓存7个道路标线提示的连续Presence logit，以及组合置信度
+不低于0.5、经mask去重后的top-50实例。教师实例与学生200个候选按软分类、框和降采样软mask
+组合代价做Hungarian集合匹配，匹配后蒸馏软分类、框、GIoU及连续mask；教师未检出的候选不被
+硬标成负样本。无标签总权重为0.5，前10%训练步线性warmup。
+
+自动清单从591张图片中得到431张新教师正检出候选，确定性预留100张评测候选、留下331张训练
+候选。P13-A直接使用这331张未经人工复核的候选，每轮约重复28次。正式最佳点为epoch 16：
+`val/supervised=4.8242`、`val/kd=4.5465`、`val/loss=9.3707`；相对同口径P12分别只下降
+0.0216、0.0106和0.0322，训练域提升很小。
+
+随后以相同0.5阈值比较P12和P13-A的全部591张网图。在100张未参与训练的保留图上，P13-A的
+预测像素为P12的5.43倍、候选数为16.36倍；331张训练候选分别为3.96倍和13.12倍；160张教师
+未检出图分别为5.76倍和27.14倍。检测数包含重复Query，图片没有GT，不能把倍数当成精度。
+肉眼检查确认P13-A在雨夜、反光、磨损、航拍和远距离细线中确实恢复了部分P12漏检，但也出现
+大量同物体多Query、多提示重复响应、箭头/文字/车辆误触发和mask变粗。
+
+阶段结论不是“无标签蒸馏无效”，而是“召回扩张成功、校准失败”。问题与P13-A只约束教师高置信
+匹配Query、没有约束其余学生Query的损失设计一致。下一步暂缓直接叠加强弱增强，优先做全部200个
+候选的软分布校准、重复候选抑制、无标签曝光量和数据清洗消融；教师漏检仍不得作为hard negative。
+详细训练表、591图统计和本地可视化位置见[P13-A说明](p13_unlabeled_output_distill/README.md)。
+
 ## 常用命令
 
 P0四卡训练：
@@ -439,4 +476,12 @@ P12全部候选缓存与四卡训练：
 ```bash
 bash sam3_lightweight_tinyvit_stage3_distill_exp/p12_query_set_distill/scripts/cache_dense_teacher_queries_4gpu.sh
 bash sam3_lightweight_tinyvit_stage3_distill_exp/p12_query_set_distill/scripts/train_p12_query_set_4gpu.sh
+```
+
+P13-A候选清单、单教师缓存与四卡训练：
+
+```bash
+bash sam3_lightweight_tinyvit_stage3_distill_exp/p13_unlabeled_output_distill/scripts/prepare_unlabeled_manifests.sh
+bash sam3_lightweight_tinyvit_stage3_distill_exp/p13_unlabeled_output_distill/scripts/cache_unlabeled_teacher_4gpu.sh
+bash sam3_lightweight_tinyvit_stage3_distill_exp/p13_unlabeled_output_distill/scripts/train_p13a_4gpu.sh
 ```

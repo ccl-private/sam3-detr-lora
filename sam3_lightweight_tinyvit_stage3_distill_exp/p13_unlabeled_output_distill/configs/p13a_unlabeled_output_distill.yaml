@@ -1,0 +1,47 @@
+experiment: P13-A-单教师无标签高置信输出蒸馏
+student_checkpoint: ../../sam3_lightweight_stage3_exp/input/efficientsam3_tinyvit_stage3.pt
+teacher_lora: ../../sam3_detr_exp/negative_prompt_ablation/weights/roadline_r8_a16_lr2e4_no_generic_negatives.best.pt
+
+training:
+  start_from_official_tinyvit: true
+  epochs: 20
+  devices: 4
+  labeled_batch_size_per_gpu: 4
+  unlabeled_batch_size_per_gpu: 4
+  labeled_to_unlabeled_image_ratio: "1:1"
+  precision: bf16-mixed
+  seed: 42
+  lora_lr: 5.0e-5
+  image_lora_lr: 1.0e-5
+  head_lr: 2.0e-5
+  branch_lr: 1.0e-4
+  gate_lr: 1.0e-3
+
+labeled_loss:
+  same_as_p12: true
+
+unlabeled_teacher_cache:
+  prompts: 7
+  combined_score_threshold: 0.5
+  topk_per_prompt: 50
+  duplicate_mask_nms_iou: 0.85
+  cache_continuous_mask_logits: true
+  use_official_base_teacher: false
+
+unlabeled_loss:
+  total_weight: 0.5
+  warmup_ratio: 0.10
+  presence_weight: 1.0
+  soft_class_weight: 1.0
+  box_l1_weight: 5.0
+  giou_weight: 2.0
+  mask_bce_weight: 2.0
+  soft_dice_weight: 1.0
+  hard_negative_for_missing_teacher_output: false
+
+excluded_from_p13a:
+  - 强弱增强一致性
+  - 无标签全部200候选集合KD
+  - 无标签跨提示关系KD
+  - 边界与中心线蒸馏
+  - Decoder逐层蒸馏

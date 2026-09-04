@@ -1,8 +1,19 @@
-# DETR LoRA 后续工作清单
+# DETR LoRA 工作状态与后续清单
 
 当前多提示训练、数据集内负提示、通用域外负提示、SAM3 原生 loss、
 auxiliary/O2M loss、固定验证 loss、best checkpoint 和 4 卡 DDP 训练均已实现。
-本文档只保留尚未完成的工作。
+
+状态更新时间：2026-09-03。本文档不再只列“计划”，而是保留已完成、部分完成和未完成项，
+防止已经执行的消融被重复安排。状态口径如下：
+
+- `[x]`：已经有可复核代码、训练结果或正式评测结果；
+- `[ ]`：尚未完成；
+- `部分完成`：已经有实现或结果，但还没有达到该条目的完整验收范围，因此复选框仍不勾选。
+
+本次盘点结论：域外纯负提示的C/D关键对照已经完成；逐类mask指标、统一10图评测和综合指标选模
+在TinyViT P10及统一benchmark中已有部分实现，但尚未回填到Base DETR正式训练链；优化器消融、
+自动化测试和完整A～F提示矩阵仍未完成。本文共36个复选项：3项完成、6项部分完成、27项尚未完成；
+部分完成项仍保持未勾选。
 
 ## 0. 负提示词来源、退化证据与待验证假设
 
@@ -36,10 +47,10 @@ auxiliary/O2M loss、固定验证 loss、best checkpoint 和 4 卡 DDP 训练均
 | 回溯消融`roadline_r8_a16_lr2e4_no_generic_negatives.best.pt`（后续称“新Base教师”） | 多提示，只保留数据集内负提示 | 20 | 关闭域外纯负提示后恢复`car`；也是TinyViT P9教师 |
 
 正式训练的一个已记录批次由 2 张图片展开为 18 个文本查询，其中 4 个正提示、10 个数据集内
-负提示、4 个通用域外负提示，负查询占 77.8%。这些结果形成了较强相关证据，但尚不能替代严格
-单变量实验；分类头持续更新、训练轮数和多提示批次展开也可能共同作用。
+负提示、4 个通用域外负提示，负查询占 77.8%。历史结果最初只形成相关证据；后续C/D严格回溯
+已经在保持其余正式训练条件不变的情况下确认：域外纯负提示是当前已验证的跨类别退化主因。
 
-### 0.3 未来必须完成的单变量实验
+### 0.3 单变量实验状态
 
 第一个正式消融已经在[域外负提示消融目录](../negative_prompt_ablation/README.md)完成：保持正式
 `roadline_r8_a16_lr2e4`的多提示训练条件不变，仅通过`--num-generic-negatives 0`关闭域外通用
@@ -49,14 +60,14 @@ auxiliary/O2M loss、固定验证 loss、best checkpoint 和 4 卡 DDP 训练均
 所有实验必须从同一个未专项化 Base checkpoint 开始，固定数据划分、随机种子、训练轮数、
 学习率、LoRA 配置和 batch 中的图片数，只改变提示构造：
 
-- [ ] A：单正提示基线，不加入任何负提示。
-- [ ] B：单正提示 + SAM3 原生 loss/Presence，复现早期能力保持结果。
+- [ ] A：单正提示基线，不加入任何负提示。历史早期模型可供参考，但不是与C/D同条件的严格对照。
+- [ ] B：单正提示 + SAM3 原生 loss/Presence，复现早期能力保持结果。已有早期`car=20`证据，但不是与C/D同条件的严格对照。
 - [x] C：正提示 + 数据集内缺失道路标线类别，禁止通用域外负提示。已完成，平均IoU 0.7483，`car=20`。
 - [x] D：在 C 的基础上加入通用域外负提示，复现正式训练策略。历史完整20轮基线最低loss 4.2201，旧正式教师`car=0`。
-- [ ] E：通用类别同时加入少量正样本或旧 Base 教师的保持蒸馏，验证能否避免类别抑制。
-- [ ] F：在 C/D 中分别冻结与训练点积分类头，分离分类头漂移的影响。
+- [ ] E：通用类别同时加入少量正样本或旧 Base 教师的保持蒸馏，验证能否避免类别抑制。未执行；当前路线默认关闭域外纯负提示。
+- [ ] F：在 C/D 中分别冻结与训练点积分类头，分离分类头漂移的影响。未执行。
 - [ ] 扫描每图负提示数量及正负比例，至少比较 0、1、2 个通用负提示和受控的 1:1、1:2
-  正负比例。
+  正负比例。未执行；现有C/D只覆盖0个与历史2个设置。
 
 每个 checkpoint 除道路标线 IoU/Recall 外，必须固定测试 `car`、`person`、`dog` 等训练中出现过
 的通用负词，以及若干从未作为副提示出现的开放类别，并记录阈值 0.1/0.3/0.5 下的检测数、
@@ -67,12 +78,12 @@ auxiliary/O2M loss、固定验证 loss、best checkpoint 和 4 卡 DDP 训练均
 
 训练选优目前仍以固定提示集合上的 `val/loss` 为准。需要增加与最终视觉效果更直接相关的指标：
 
-- [ ] 每类 box AP、precision 和 recall。
-- [ ] 每类 mask IoU 和 Dice。
-- [ ] 数据集内空提示的 false-positive rate。
-- [ ] 所有类别的 micro/macro 平均指标。
-- [ ] 将上述指标按 epoch 写入训练日志。
-- [ ] 评估使用综合检测/分割指标代替 `val/loss` 选择 best checkpoint。
+- [ ] 每类 box AP、precision 和 recall。未实现。
+- [ ] 每类 mask IoU 和 Dice。**部分完成：**P10已按类别记录mask IoU/precision/recall，但尚无Dice，也未回填Base DETR训练模块。
+- [ ] 数据集内空提示的 false-positive rate。未实现正式指标。
+- [ ] 所有类别的 micro/macro 平均指标。**部分完成：**统一benchmark输出逐类micro指标，P10记录有效类别macro IoU/Recall；尚未形成同一套完整口径。
+- [ ] 将上述指标按 epoch 写入训练日志。**部分完成：**P10逐epoch记录逐类mask指标，Base DETR仍只记录loss。
+- [ ] 评估使用综合检测/分割指标代替 `val/loss` 选择 best checkpoint。**部分完成：**P10已使用`val/control_score`选优和早停，但Base DETR及P9/P12尚未统一采用。
 
 评估必须固定以下条件，避免不同实验之间无法比较：
 
@@ -83,9 +94,9 @@ auxiliary/O2M loss、固定验证 loss、best checkpoint 和 4 卡 DDP 训练均
 
 ## 2. 固定回归对比
 
-- [ ] 建立统一脚本，在同一进程和相同参数下依次测试 base、旧 LoRA、新 LoRA。
-- [ ] 固定使用 roadline 验证集和 `roadline/20260106` 前 10 张测试图。
-- [ ] 输出逐图/逐类检测数量、分数、可视化及汇总 CSV。
+- [ ] 建立统一脚本，在同一进程和相同参数下依次测试 base、旧 LoRA、新 LoRA。**部分完成：**已有Base统一评测脚本和TinyViT统一benchmark，但尚无单进程三权重回归脚本。
+- [x] 固定10图历史回归集和7个道路标线提示。现统一使用同一无人机视频`DJI_20251231162942_0002_V`的10张图；它只用于历史可比，不再视为总体泛化测试集。
+- [ ] 输出逐图/逐类检测数量、分数、可视化及汇总 CSV。**部分完成：**当前benchmark可输出`details.csv`、`summary.json`和TinyViT可视化；Base/旧LoRA/新LoRA尚未由一个命令完整生成同构产物。
 - [ ] 加入检测框和 mask NMS，减少同一车道线的重复候选。
 - [ ] 评估长实线实例是否需要 mask 合并或专门的后处理。
 
@@ -95,8 +106,8 @@ auxiliary/O2M loss、固定验证 loss、best checkpoint 和 4 卡 DDP 训练均
 
 以下参数已有命令行选项，不需要修改代码：
 
-- [ ] 使用 `--lora-rank 16 --lora-alpha 32 --lora-dropout 0.1` 训练对照实验。
-- [ ] 使用 `--lr 1e-4` 训练对照实验。
+- [ ] 使用 `--lora-rank 16 --lora-alpha 32 --lora-dropout 0.1` 训练Base DETR对照实验。TinyViT P3做过全LoRA r16，但不能代替Base单变量实验。
+- [ ] 使用 `--lr 1e-4` 训练Base DETR对照实验。未执行。
 
 以下能力尚未暴露或实现，需要先修改 `sam3_detr_exp` 内的训练代码：
 
@@ -114,6 +125,9 @@ auxiliary/O2M loss、固定验证 loss、best checkpoint 和 4 卡 DDP 训练均
 5. 再加入 warmup + cosine scheduler。
 
 ## 4. 自动化测试
+
+当前`sam3_detr_exp`下没有覆盖下列行为的自动化测试目录；历史冒烟训练和人工评测不能视为这些
+断言测试已经完成，因此本节全部保持未勾选。
 
 ### 数据集
 
@@ -138,9 +152,8 @@ auxiliary/O2M loss、固定验证 loss、best checkpoint 和 4 卡 DDP 训练均
 
 ## 5. 推荐实施顺序
 
-1. 建立统一 base/旧 LoRA/新 LoRA 回归脚本。
-2. 增加 AP、recall、IoU、Dice 和空提示误检率。
-3. 补齐 Dataset、空 target 和验证确定性测试。
-4. 增加 gradient clipping、warmup 和 cosine scheduler。
-5. 按单变量方式完成训练参数消融。
-6. 根据任务指标决定是否改变 best checkpoint 的选取标准。
+1. 补成单进程base/旧LoRA/新LoRA回归脚本，复用现有CSV、JSON和可视化逻辑。
+2. 把P10已有的逐类mask IoU/precision/recall回填Base DETR，并补Dice、box AP和空提示误检率。
+3. 补齐Dataset、空target和单卡/四卡验证确定性自动化测试。
+4. 再增加gradient clipping、warmup、cosine scheduler和逐step学习率日志。
+5. 是否补做A/B/E/F及优化器消融，按当前研究优先级决定；C/D主因结论已经成立，不再阻塞默认训练。
