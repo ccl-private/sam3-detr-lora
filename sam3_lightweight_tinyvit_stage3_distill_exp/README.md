@@ -4,6 +4,9 @@
 
 所有 TinyViT 相关代码、配置、日志、权重和测试都只放在本目录。测试产物位于 `tests/output/`，不提交 Git。
 
+只想复现当前定量最佳轻量模型时，请先阅读根目录的[最佳实践快速上手](../BEST_PRACTICES.md)，
+直接训练P12即可，不需要依次重跑P0～P11。
+
 模型文件不能用“Stage-3基模大小 + LoRA checkpoint大小”直接相加：当前LoRA保存器重复保存了约
 116 MiB的`weight.original`，而P5～P8只有约5.27 MiB是真正新增、无法折叠的结构。各阶段实际
 文件组成、LoRA可合并范围、最终FP32/FP16推理体积和正式导出TODO见

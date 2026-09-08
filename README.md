@@ -2,6 +2,10 @@
 
 本仓库围绕SAM3开展三部分连续工作：首先拆分并重组原始SAM3，建立可独立训练和替换模块的工程结构；随后在模块化Base DETR上完成道路标线LoRA微调；最后以成功微调的Base模型为能力上限和教师，探索EfficientViT、TinyViT及蒸馏方案。
 
+新手复现请直接阅读[《SAM3微调与轻量蒸馏最佳实践》](BEST_PRACTICES.md)：文档给出了当前最佳
+Base与轻量模型选择、两个官方基模的原始下载链接、YOLO segmentation数据格式、训练/缓存/评测
+命令和常见问题，不需要从P0开始顺序重跑所有历史实验。
+
 因此，本项目不是单一的轻量化实验。SAM3模块化和Base DETR LoRA微调本身就是已经完成的核心成果，轻量化与蒸馏是建立在它们之上的后续研究。五个实验目录按实际发生顺序形成如下路线：
 
 知乎系列长文草稿与真实网图效果展示：[《把SAM3道路标线能力做强、再做小：微调保泛化与轻量化蒸馏实录（上）》](docs/zhihu/SAM3道路标线微调与泛化保持.md)。本篇讲Base微调与泛化保持，文首目录已列出待更新的轻量骨干、蒸馏、细线结构和AGX部署路线。
@@ -454,7 +458,7 @@ P10在旧10图平均IoU仍低于P9，却在3张域外图恢复了P9消失的城�
 | [sam3_lightweight_exp](sam3_lightweight_exp/README.md) | 第1步：早期轻量化可行性验证 |
 | [sam3_lightweight_stage3_exp](sam3_lightweight_stage3_exp/README.md) | 第2步：EfficientViT Stage-3直接LoRA基线 |
 | [sam3_lightweight_stage3_distill_exp](sam3_lightweight_stage3_distill_exp/README.md) | 第3步：EfficientViT最终输出蒸馏 |
-| [sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | 第4、6、7、8、9步：TinyViT P0～P8结构实验、P9新教师从头蒸馏、P10验证闭环提示控制、P11删除P7高分支消融，以及P12候选集合与跨提示关系KD |
+| [sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | TinyViT P0～P8结构实验、P9新教师从头蒸馏、P10提示控制、P11精简消融、P12候选集合与跨提示关系KD，以及P13-A无标签输出蒸馏 |
 
 ## 当前结论与下一步
 
