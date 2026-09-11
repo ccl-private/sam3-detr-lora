@@ -1,12 +1,12 @@
 # SAM3模块化、LoRA微调与轻量化蒸馏实验总览
 
-本仓库围绕SAM3开展三部分连续工作：首先拆分并重组原始SAM3，建立可独立训练和替换模块的工程结构；随后在模块化Base DETR上完成道路标线LoRA微调；最后以成功微调的Base模型为能力上限和教师，探索EfficientViT、TinyViT及蒸馏方案。
+本仓库围绕SAM3开展四部分连续工作：首先拆分并重组原始SAM3，建立可独立训练和替换模块的工程结构；随后在模块化Base DETR上完成道路标线LoRA微调；再以成功微调的Base模型为能力上限和教师，探索EfficientViT、TinyViT及蒸馏方案；最后将当前最佳P12轻量模型固化文本、合并LoRA并开展部署测速。
 
 新手复现请直接阅读[《SAM3微调与轻量蒸馏最佳实践》](BEST_PRACTICES.md)：文档给出了当前最佳
 Base与轻量模型选择、两个官方基模的原始下载链接、YOLO segmentation数据格式、训练/缓存/评测
 命令和常见问题，不需要从P0开始顺序重跑所有历史实验。
 
-因此，本项目不是单一的轻量化实验。SAM3模块化和Base DETR LoRA微调本身就是已经完成的核心成果，轻量化与蒸馏是建立在它们之上的后续研究。五个实验目录按实际发生顺序形成如下路线：
+因此，本项目不是单一的轻量化实验。SAM3模块化和Base DETR LoRA微调本身就是已经完成的核心成果，轻量化、蒸馏与部署是建立在它们之上的后续研究。六个实验目录按实际发生顺序形成如下路线：
 
 知乎系列长文草稿与真实网图效果展示：[《把SAM3道路标线能力做强、再做小：微调保泛化与轻量化蒸馏实录（上）》](docs/zhihu/SAM3道路标线微调与泛化保持.md)。本篇讲Base微调与泛化保持，文首目录已列出待更新的轻量骨干、蒸馏、细线结构和AGX部署路线。
 
@@ -50,6 +50,11 @@ Base与轻量模型选择、两个官方基模的原始下载链接、YOLO segme
    ↓
 5. 回到Base做域外负提示消融：保留内部负提示，只关闭person/dog/cat等纯负提示
    └── car从0恢复到20，平均IoU从旧教师0.7021提高到0.7483
+   ↓
+6. 固化当前最佳P12轻量模型用于部署
+   ├── 固定7类道路标线文本特征并移除运行时MobileCLIP
+   ├── 合并124处LoRA，导出FP32/FP16单文件
+   └── 分开评测预处理、模型前向、后处理及多提示批处理
 ```
 
 下面按真实实验先后说明每一步的独立目标、训练基础、结果，以及它与后续实验的关系。详细命令、代码结构和完整指标放在对应实验目录的README中。
@@ -450,7 +455,7 @@ P10在旧10图平均IoU仍低于P9，却在3张域外图恢复了P9消失的城�
 | 低分辨率斜视 | ![低分辨率斜视来源图](assets/experiments/roadline_cross_shape_generalization/source_oblique_lowres.webp) | ![低分辨率斜视白实线](assets/experiments/roadline_cross_shape_generalization/p8_oblique_white_solid.jpg) | ![低分辨率斜视白虚线](assets/experiments/roadline_cross_shape_generalization/p8_oblique_white_dashed.jpg) |
 | 乡村弯道 | ![乡村弯道来源图](assets/experiments/roadline_cross_shape_generalization/source_rural_curve.png) | ![乡村弯道白实线](assets/experiments/roadline_cross_shape_generalization/p8_rural_white_solid.jpg) | ![乡村弯道白虚线](assets/experiments/roadline_cross_shape_generalization/p8_rural_white_dashed.jpg) |
 
-## 五个实验目录的职责
+## 六个实验目录的职责
 
 | 目录 | 在路线中的位置 |
 |---|---|
@@ -459,6 +464,7 @@ P10在旧10图平均IoU仍低于P9，却在3张域外图恢复了P9消失的城�
 | [sam3_lightweight_stage3_exp](sam3_lightweight_stage3_exp/README.md) | 第2步：EfficientViT Stage-3直接LoRA基线 |
 | [sam3_lightweight_stage3_distill_exp](sam3_lightweight_stage3_distill_exp/README.md) | 第3步：EfficientViT最终输出蒸馏 |
 | [sam3_lightweight_tinyvit_stage3_distill_exp](sam3_lightweight_tinyvit_stage3_distill_exp/README.md) | TinyViT P0～P8结构实验、P9新教师从头蒸馏、P10提示控制、P11精简消融、P12候选集合与跨提示关系KD，以及P13-A无标签输出蒸馏 |
+| [sam3_lightweight_p12_deploy_exp](sam3_lightweight_p12_deploy_exp/README.md) | 第6步：固化P12文本、合并LoRA、FP16单文件导出、等价验证与部署分阶段测速 |
 
 ## 当前结论与下一步
 
@@ -490,7 +496,14 @@ P10在旧10图平均IoU仍低于P9，却在3张域外图恢复了P9消失的城�
 
 以Base图像模型FP32张量3245.05 MiB为相同口径，EfficientViT Stage-3合并后为371.76 MiB，缩小
 8.73倍；当前TinyViT P8合并后为400.31 MiB FP32或约200.16 MiB FP16，均相对同精度Base缩小
-8.11倍、减少87.66%。固定道路标线词表并移除MobileCLIP后，P8预计约119 MiB FP16，但不再支持
-运行时任意文本。当前469.98 MiB基模和139.00 MiB P8 checkpoint包含重复权重，不能直接相加作为
+8.11倍、减少87.66%。当前最佳P12固定7类道路标线词表并移除MobileCLIP、合并124处LoRA后，
+已实际导出238.92 MiB FP32或119.60 MiB FP16单文件，但不再支持运行时任意文本。当前469.98 MiB
+基模和训练checkpoint包含重复权重，不能直接相加作为
 最终模型大小。完整计算口径、各阶段压缩率、可合并模块和正式导出TODO见
 [轻量模型体积、权重合并与最终推理包分析](sam3_lightweight_tinyvit_stage3_distill_exp/模型体积与合并分析.md)。
+
+部署代码、导出命令、精度对照和当前阶段结论统一见
+[P12固定词表轻量部署实验](sam3_lightweight_p12_deploy_exp/README.md)，详细模块耗时见
+[FP16部署模块耗时分析](sam3_lightweight_p12_deploy_exp/profiling.md)。A800单提示FP16实测中，
+预处理0.78ms、神经网络前向61.63ms、后处理1.41ms，GPU张量组合链路63.50ms；模型构建、
+权重加载与传GPU、磁盘读图和图片解码均未计入。该结果不是AGX实测，TensorRT导出仍待完成。
