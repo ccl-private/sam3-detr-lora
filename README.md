@@ -507,7 +507,9 @@ P10在旧10图平均IoU仍低于P9，却在3张域外图恢复了P9消失的城�
 [轻量模型体积、权重合并与最终推理包分析](sam3_lightweight_tinyvit_stage3_distill_exp/模型体积与合并分析.md)。
 
 部署代码、导出命令、精度对照和当前阶段结论统一见
-[P12固定词表轻量部署实验](sam3_lightweight_p12_deploy_exp/README.md)，详细模块耗时见
-[FP16部署模块耗时分析](sam3_lightweight_p12_deploy_exp/profiling.md)。A800单提示FP16实测中，
-预处理0.78ms、神经网络前向61.63ms、后处理1.41ms，GPU张量组合链路63.50ms；模型构建、
-权重加载与传GPU、磁盘读图和图片解码均未计入。该结果不是AGX实测，TensorRT导出仍待完成。
+[P12固定词表轻量部署实验](sam3_lightweight_p12_deploy_exp/README.md)，选型与入口见
+[轻量化部署最佳实践](sam3_lightweight_p12_deploy_exp/BEST_PRACTICES.md)，详细模块耗时见
+[FP16部署模块耗时分析](sam3_lightweight_p12_deploy_exp/profiling.md)。A800单提示端到端实测：
+PyTorch FP16路径63.50ms，固定白实线的TensorRT FP16引擎24.74ms；模型构建、权重加载与传GPU、
+磁盘读图和图片解码均未计入。两者都是A800本机结果，不是AGX实测；TensorRT引擎需在目标机
+重新构建、验证和测速，7个提示在TensorRT上的代价未测。
